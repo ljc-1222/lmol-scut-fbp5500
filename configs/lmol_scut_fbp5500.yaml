@@ -1,0 +1,63 @@
+experiment_name: lmol_scut_fbp5500
+seed: 42
+
+dataset:
+  root: data/raw/SCUT-FBP5500
+  image_dir: Images
+  annotation_file: labels.txt
+  expected_count: 5500
+  score_min: 1.0
+  score_max: 5.0
+  folds: 5
+  fold_index: 0
+  split_seed: 42
+
+pairs:
+  theta: 0.2
+  train_pairs_per_label: 30000
+  instruction: "<image1><image2>\nWhich face looks more attractive?"
+  answers: ["First.", "Second.", "Similar."]
+  output_dir: artifacts/pairs/full
+  seed: 42
+
+model:
+  model_id: llava-hf/llava-1.5-7b-hf
+  image_size: 336
+  load_in_4bit: true
+  lora_r: 8
+  lora_alpha: 32
+  lora_dropout: 0.05
+  target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
+
+training:
+  output_dir: outputs/lmol_scut_fbp5500
+  num_epochs: 1
+  per_device_batch_size: 1
+  gradient_accumulation_steps: 16
+  projector_lr: 0.00002
+  lora_lr: 0.0002
+  weight_decay: 0.0
+  max_steps:
+  precision: bf16
+  gradient_checkpointing: false
+  save_steps: 500
+  log_steps: 10
+  objective: choice_token
+
+wandb:
+  enabled: true
+  project: lmol-fbp
+  entity:
+  name:
+  group:
+  mode: online
+  tags: ["lmol", "scut-fbp5500"]
+
+evaluation:
+  output_dir: outputs/evaluation
+  batch_size: 2
+  max_new_tokens: 4
+  reference_count: 340
+  bt_grid_size: 401
+  eval_steps: 500
+  eval_max_pairs: 256

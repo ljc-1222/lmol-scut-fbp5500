@@ -1,0 +1,26 @@
+{
+  "confusion_matrix_rows_gold_cols_pred": {
+    "First.": [
+      103159,
+      282,
+      17395
+    ],
+    "Second.": [
+      341,
+      176829,
+      17600
+    ],
+    "Similar.": [
+      7002,
+      7909,
+      43483
+    ]
+  },
+  "count": 374000,
+  "labels": [
+    "First.",
+    "Second.",
+    "Similar."
+  ],
+  "pairwise_accuracy": 0.8648957219251336
+}
