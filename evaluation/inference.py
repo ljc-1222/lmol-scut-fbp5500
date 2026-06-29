@@ -8,15 +8,30 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-from data.instruction_dataset import ANSWER_TO_INDEX, LMOLDataCollator
-from data.pairs import ANSWER_FIRST, ANSWER_SECOND, ANSWER_SIMILAR, PairExample
+from data.instruction_dataset import LMOLDataCollator
+from data.pairs import ANSWER_FIRST, ANSWER_SECOND, ANSWER_SIMILAR, CANONICAL_ANSWERS, PairExample
 
-VALID_ANSWERS = (ANSWER_FIRST, ANSWER_SECOND, ANSWER_SIMILAR)
+VALID_ANSWERS = CANONICAL_ANSWERS
 ANSWER_LOGPROB_COLUMNS = {
-    ANSWER_FIRST: "first_logprob",
-    ANSWER_SECOND: "second_logprob",
-    ANSWER_SIMILAR: "similar_logprob",
+    ANSWER_FIRST: "logprob_first",
+    ANSWER_SECOND: "logprob_second",
+    ANSWER_SIMILAR: "logprob_similar",
 }
+PREDICTION_DECODING_METHOD = "first_token_choice"
+PREDICTION_CSV_FIELDS = [
+    "target_image",
+    "reference_image",
+    "target_score",
+    "reference_score",
+    "true_answer",
+    "predicted_answer",
+    "decoding_method",
+    "valid_choice",
+    "logprob_first",
+    "logprob_second",
+    "logprob_similar",
+    "nll",
+]
 
 
 @dataclass(frozen=True)
@@ -195,26 +210,32 @@ def evaluate_pairwise_likelihood(
     )
 
 
+def prediction_csv_row(pair: PairExample, result: LikelihoodPrediction) -> dict[str, object]:
+    """Return one first-token-choice prediction row."""
+
+    row: dict[str, object] = {
+        "target_image": pair.image1,
+        "reference_image": pair.image2,
+        "target_score": pair.score1,
+        "reference_score": pair.score2,
+        "true_answer": pair.answer,
+        "predicted_answer": result.prediction,
+        "decoding_method": PREDICTION_DECODING_METHOD,
+        "valid_choice": result.prediction in VALID_ANSWERS,
+        "nll": -result.answer_logprobs[pair.answer],
+    }
+    for answer, column in ANSWER_LOGPROB_COLUMNS.items():
+        row[column] = result.answer_logprobs[answer]
+    return row
+
+
 def write_predictions_csv(rows: Iterable[dict[str, object]], path: str | Path) -> None:
     """Write pairwise likelihood predictions to CSV."""
 
     out_path = Path(path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    fields = [
-        "image1",
-        "image2",
-        "score1",
-        "score2",
-        "label",
-        "prediction",
-        "valid",
-        "generation",
-        "first_logprob",
-        "second_logprob",
-        "similar_logprob",
-    ]
     with out_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer = csv.DictWriter(handle, fieldnames=PREDICTION_CSV_FIELDS)
         writer.writeheader()
         for row in rows:
             writer.writerow(row)

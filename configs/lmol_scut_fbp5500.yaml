@@ -15,14 +15,12 @@ dataset:
 pairs:
   theta: 0.2
   train_pairs_per_label: 30000
-  instruction: "<image1><image2>\nWhich face looks more attractive?"
-  answers: ["First.", "Second.", "Similar."]
+  instruction: "<image1><image2>, which face looks more attractive?"
   output_dir: artifacts/pairs/full
   seed: 42
 
 model:
   model_id: llava-hf/llava-1.5-7b-hf
-  image_size: 336
   load_in_4bit: true
   lora_r: 8
   lora_alpha: 32
@@ -42,7 +40,6 @@ training:
   gradient_checkpointing: false
   save_steps: 500
   log_steps: 10
-  objective: choice_token
 
 wandb:
   enabled: true
@@ -57,7 +54,12 @@ evaluation:
   output_dir: outputs/evaluation
   batch_size: 2
   max_new_tokens: 4
-  reference_count: 340
-  bt_grid_size: 401
+  reference_bin_width: 0.1
+  reference_max_per_bin:
+  reference_seed: 42
+  score_min: 1.0
+  score_max: 5.0
+  bt_delta: 2.0
+  bt_k: 10.0
   eval_steps: 500
   eval_max_pairs: 256

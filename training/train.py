@@ -1,4 +1,4 @@
-"""Minimal LMOL conditional language modeling training loop."""
+"""Minimal LMOL first-answer-token training loop."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ from typing import Any
 
 from configs import LMOLConfig
 
-VALID_TRAINING_OBJECTIVES = {"choice_token", "conditional_lm"}
 from data.instruction_dataset import LMOLDataCollator, LMOLInstructionDataset, assert_pair_images_exist
 from data.pairs import read_pairs_csv
 from evaluation.inference import evaluate_pairwise_likelihood
@@ -145,7 +144,7 @@ def train_lmol(
     wandb_project: str | None = None,
     wandb_name: str | None = None,
 ) -> Path:
-    """Train LMOL for one fold using the configured answer-token objective."""
+    """Train LMOL for one fold using first-answer-token classification."""
 
     import torch
     import torch.nn.functional as F
@@ -153,8 +152,6 @@ def train_lmol(
     from torch.optim.lr_scheduler import CosineAnnealingLR
     from torch.utils.data import DataLoader
 
-    if config.training.objective not in VALID_TRAINING_OBJECTIVES:
-        raise ValueError(f"Invalid training objective: {config.training.objective!r}")
     if max_steps is not None and max_steps <= 0:
         raise ValueError(f"max_steps must be positive when provided, got {max_steps}")
     if stop_after_steps is not None and stop_after_steps <= 0:
@@ -218,22 +215,15 @@ def train_lmol(
         for _epoch in range(config.training.num_epochs):
             for batch_index, batch in enumerate(loader, start=1):
                 batch = {key: value.to(model.device) if hasattr(value, "to") else value for key, value in batch.items()}
-                if config.training.objective == "choice_token":
-                    choice_labels = batch.pop("choice_labels")
-                    choice_positions = batch.pop("choice_positions")
-                    choice_token_ids = batch.pop("choice_token_ids")
-                    batch.pop("labels")
-                    outputs = model(**batch)
-                    row_indices = torch.arange(outputs.logits.shape[0], device=outputs.logits.device)
-                    next_token_logits = outputs.logits[row_indices, choice_positions, :].float()
-                    choice_logits = next_token_logits.index_select(dim=-1, index=choice_token_ids)
-                    raw_loss = F.cross_entropy(choice_logits, choice_labels)
-                else:
-                    batch.pop("choice_labels", None)
-                    batch.pop("choice_positions", None)
-                    batch.pop("choice_token_ids", None)
-                    outputs = model(**batch)
-                    raw_loss = outputs.loss
+                choice_labels = batch.pop("choice_labels")
+                choice_positions = batch.pop("choice_positions")
+                choice_token_ids = batch.pop("choice_token_ids")
+                batch.pop("labels")
+                outputs = model(**batch)
+                row_indices = torch.arange(outputs.logits.shape[0], device=outputs.logits.device)
+                next_token_logits = outputs.logits[row_indices, choice_positions, :].float()
+                choice_logits = next_token_logits.index_select(dim=-1, index=choice_token_ids)
+                raw_loss = F.cross_entropy(choice_logits, choice_labels)
                 scaled_loss = raw_loss / config.training.gradient_accumulation_steps
                 pending_loss_sum += float(raw_loss.detach().cpu())
                 pending_loss_count += 1

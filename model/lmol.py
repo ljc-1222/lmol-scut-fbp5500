@@ -9,6 +9,8 @@ import torch
 
 from configs import LMOLConfig
 
+PAPER_IMAGE_SIZE = 336
+
 
 def _missing_dependency_error(name: str, exc: Exception) -> RuntimeError:
     error = RuntimeError(
@@ -152,6 +154,39 @@ def _gradient_checkpointing_kwargs() -> dict[str, bool]:
     return {"use_reentrant": False}
 
 
+def _square_image_size(value: Any) -> int | None:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, dict):
+        if "height" in value and "width" in value:
+            height = int(value["height"])
+            width = int(value["width"])
+            if height != width:
+                raise ValueError(f"Loaded processor expects non-square images: height={height}, width={width}")
+            return height
+        if "shortest_edge" in value:
+            return int(value["shortest_edge"])
+    return None
+
+
+def _processor_image_size(processor: Any) -> int:
+    image_processor = getattr(processor, "image_processor", processor)
+    for attr in ("crop_size", "size"):
+        resolved = _square_image_size(getattr(image_processor, attr, None))
+        if resolved is not None:
+            return resolved
+    raise ValueError("Could not determine the loaded processor image size from image_processor.crop_size or image_processor.size")
+
+
+def _validate_processor_image_size(processor: Any, expected_size: int = PAPER_IMAGE_SIZE) -> None:
+    actual_size = _processor_image_size(processor)
+    if actual_size != expected_size:
+        raise ValueError(
+            "Loaded processor image size does not match the supported LLaVA-1.5/CLIP ViT-L/14-336px size. "
+            f"expected image size={expected_size}, processor image size={actual_size}."
+        )
+
+
 def _disable_training_cache(model: Any) -> None:
     """Disable generation KV cache on every nested config used during training."""
 
@@ -197,6 +232,7 @@ def load_lmol_model(config: LMOLConfig, train: bool = True) -> tuple[Any, Any]:
         )
 
     processor = AutoProcessor.from_pretrained(config.model.model_id)
+    _validate_processor_image_size(processor)
     model = LlavaForConditionalGeneration.from_pretrained(
         config.model.model_id,
         quantization_config=quantization_config,

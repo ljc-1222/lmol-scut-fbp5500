@@ -10,7 +10,7 @@ from pathlib import Path
 
 from configs import config_for_fold, load_config
 from data.pairs import read_pairs_csv
-from evaluation.inference import ANSWER_LOGPROB_COLUMNS, predict_answers_by_likelihood, write_predictions_csv
+from evaluation.inference import predict_answers_by_likelihood, prediction_csv_row, write_predictions_csv
 
 
 def main() -> int:
@@ -46,19 +46,7 @@ def main() -> int:
     for pair, result in zip(pairs, predictions):
         total_loss += -result.answer_logprobs[pair.answer]
         correct += int(result.prediction == pair.answer)
-        row = {
-            "image1": pair.image1,
-            "image2": pair.image2,
-            "score1": pair.score1,
-            "score2": pair.score2,
-            "label": pair.answer,
-            "prediction": result.prediction,
-            "valid": True,
-            "generation": "",
-        }
-        for answer, column in ANSWER_LOGPROB_COLUMNS.items():
-            row[column] = result.answer_logprobs[answer]
-        rows.append(row)
+        rows.append(prediction_csv_row(pair, result))
     write_predictions_csv(rows, output)
     count = len(rows)
     accuracy = correct / count if count else 0.0

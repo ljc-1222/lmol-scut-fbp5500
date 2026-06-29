@@ -13,7 +13,9 @@ from .scut_fbp5500 import SCUTRecord
 ANSWER_FIRST = "First."
 ANSWER_SECOND = "Second."
 ANSWER_SIMILAR = "Similar."
-DEFAULT_INSTRUCTION = "<image1><image2>\nWhich face looks more attractive?"
+DEFAULT_INSTRUCTION = "<image1><image2>, which face looks more attractive?"
+CANONICAL_ANSWERS = (ANSWER_FIRST, ANSWER_SECOND, ANSWER_SIMILAR)
+ANSWER_TO_INDEX = {answer: index for index, answer in enumerate(CANONICAL_ANSWERS)}
 
 
 @dataclass(frozen=True)
@@ -44,37 +46,20 @@ def label_from_scores(score1: float, score2: float, theta: float = 0.2) -> str:
     return ANSWER_SECOND
 
 
-def make_instruction() -> str:
-    """Return the exact stored LMOL instruction string."""
+def make_instruction(instruction: str | None = None) -> str:
+    """Return the stored LMOL instruction string."""
 
-    return DEFAULT_INSTRUCTION
-
-
-def _candidate_pairs(records: Sequence[SCUTRecord], theta: float, fold: int, split: str) -> dict[str, list[PairExample]]:
-    candidates = {ANSWER_FIRST: [], ANSWER_SECOND: [], ANSWER_SIMILAR: []}
-    for left_idx, image1 in enumerate(records):
-        for right_idx, image2 in enumerate(records):
-            if left_idx == right_idx:
-                continue
-            answer = label_from_scores(image1.score, image2.score, theta=theta)
-            candidates[answer].append(
-                PairExample(
-                    image1=image1.image,
-                    image2=image2.image,
-                    image1_path=image1.image_path,
-                    image2_path=image2.image_path,
-                    score1=image1.score,
-                    score2=image2.score,
-                    instruction=make_instruction(),
-                    answer=answer,
-                    fold=fold,
-                    split=split,
-                )
-            )
-    return candidates
+    return DEFAULT_INSTRUCTION if instruction is None else instruction
 
 
-def _make_pair_example(image1: SCUTRecord, image2: SCUTRecord, theta: float, fold: int, split: str) -> PairExample:
+def _make_pair_example(
+    image1: SCUTRecord,
+    image2: SCUTRecord,
+    theta: float,
+    fold: int,
+    split: str,
+    instruction: str = DEFAULT_INSTRUCTION,
+) -> PairExample:
     answer = label_from_scores(image1.score, image2.score, theta=theta)
     return PairExample(
         image1=image1.image,
@@ -83,7 +68,7 @@ def _make_pair_example(image1: SCUTRecord, image2: SCUTRecord, theta: float, fol
         image2_path=image2.image_path,
         score1=image1.score,
         score2=image2.score,
-        instruction=make_instruction(),
+        instruction=make_instruction(instruction),
         answer=answer,
         fold=fold,
         split=split,
@@ -98,6 +83,7 @@ def build_balanced_pairs(
     fold: int = 0,
     split: str = "train",
     require_full: bool = True,
+    instruction: str = DEFAULT_INSTRUCTION,
 ) -> list[PairExample]:
     """Build deterministic balanced offline pairs from a training split."""
 
@@ -127,35 +113,34 @@ def build_balanced_pairs(
                 reservoir[replacement_index] = (image1, image2)
 
     selected: list[PairExample] = []
-    for answer in (ANSWER_FIRST, ANSWER_SECOND, ANSWER_SIMILAR):
+    for answer in CANONICAL_ANSWERS:
         if candidate_counts[answer] < pairs_per_label and require_full:
             raise ValueError(
                 f"Not enough {answer} candidates: requested {pairs_per_label}, available {candidate_counts[answer]}"
             )
         selected.extend(
-            _make_pair_example(image1, image2, theta=theta, fold=fold, split=split)
+            _make_pair_example(image1, image2, theta=theta, fold=fold, split=split, instruction=instruction)
             for image1, image2 in reservoirs[answer]
         )
     rng.shuffle(selected)
     return selected
 
 
-def build_reference_pairs(
+def iter_reference_pairs(
     targets: Sequence[SCUTRecord],
     references: Sequence[SCUTRecord],
     theta: float,
     fold: int,
     split: str = "test",
-) -> list[PairExample]:
-    """Build target-reference pairs for pairwise inference and score estimation."""
+    instruction: str = DEFAULT_INSTRUCTION,
+) -> Iterable[PairExample]:
+    """Yield target-reference pairs for pairwise inference and score estimation."""
 
-    rows: list[PairExample] = []
     for target in targets:
         for reference in references:
             if target.image == reference.image:
                 continue
-            rows.append(_make_pair_example(target, reference, theta=theta, fold=fold, split=split))
-    return rows
+            yield _make_pair_example(target, reference, theta=theta, fold=fold, split=split, instruction=instruction)
 
 
 def write_pairs_csv(pairs: Iterable[PairExample], path: str | Path) -> None:

@@ -1,4 +1,4 @@
-"""PyTorch dataset and collator for LMOL conditional language modeling."""
+"""PyTorch dataset and collator for LMOL first-answer-token training."""
 
 from __future__ import annotations
 
@@ -7,11 +7,10 @@ from typing import Any
 
 from PIL import Image
 
-from .pairs import ANSWER_FIRST, ANSWER_SECOND, ANSWER_SIMILAR, PairExample
+from .pairs import ANSWER_TO_INDEX, CANONICAL_ANSWERS, PairExample
 
 IMAGE_PLACEHOLDERS = "<image1><image2>"
-VALID_ANSWERS = (ANSWER_FIRST, ANSWER_SECOND, ANSWER_SIMILAR)
-ANSWER_TO_INDEX = {answer: index for index, answer in enumerate(VALID_ANSWERS)}
+VALID_ANSWERS = CANONICAL_ANSWERS
 
 
 class LMOLInstructionDataset:
@@ -36,7 +35,7 @@ class LMOLInstructionDataset:
 
 
 class LMOLDataCollator:
-    """Collate LMOL examples for conditional generation with answer-only labels."""
+    """Collate LMOL examples with first-answer-token supervision."""
 
     def __init__(self, processor: Any) -> None:
         self.processor = processor
@@ -111,7 +110,7 @@ class LMOLDataCollator:
         return int(matches[0].item())
 
     def __call__(self, examples: list[dict[str, Any]]) -> dict[str, Any]:
-        """Tokenize a batch and mask labels before the answer string."""
+        """Tokenize a batch and mask labels so only the first answer token is supervised."""
 
         prompts = [self.render_prompt(self.processor, item["instruction"]) for item in examples]
         full_texts = [self.format_prompt_answer(prompt, item["answer"]) for prompt, item in zip(prompts, examples)]

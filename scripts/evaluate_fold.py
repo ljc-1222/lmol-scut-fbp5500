@@ -3,21 +3,23 @@
 
 from __future__ import annotations
 
-import _bootstrap  # noqa: F401
+try:
+    import _bootstrap  # noqa: F401
+except ModuleNotFoundError:  # pragma: no cover - used when imported by tests
+    from scripts import _bootstrap  # type: ignore  # noqa: F401
 
 import argparse
 import csv
 import json
 import time
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
 from configs import config_for_fold, load_config
 from data.pairs import ANSWER_FIRST, ANSWER_SECOND, ANSWER_SIMILAR, read_pairs_csv
-from evaluation.bradley_terry import ReferenceComparison, estimate_absolute_scores_from_references
-from evaluation.inference import ANSWER_LOGPROB_COLUMNS, predict_answers_by_likelihood
-from evaluation.metrics import mean_absolute_error, pearson_correlation, root_mean_squared_error
+from evaluation.inference import PREDICTION_CSV_FIELDS, predict_answers_by_likelihood, prediction_csv_row
+from evaluation.score_estimation import estimate_metrics_from_predictions_csv
 
 
 VALID_ANSWERS = (ANSWER_FIRST, ANSWER_SECOND, ANSWER_SIMILAR)
@@ -73,42 +75,6 @@ def _write_confusion_matrix(path: Path, matrix: dict[str, Counter[str]], count: 
         },
     }
     _write_json(path, payload)
-
-
-def _estimate_scores(predictions: Path, metrics_output: Path, config: Any) -> dict[str, Any]:
-    comparisons: dict[str, list[ReferenceComparison]] = defaultdict(list)
-    true_scores: dict[str, float] = {}
-    with predictions.open("r", newline="", encoding="utf-8") as handle:
-        reader = csv.DictReader(handle)
-        for row in reader:
-            prediction = row["prediction"]
-            if prediction not in VALID_ANSWERS:
-                continue
-            image = row["image1"]
-            true_scores[image] = float(row["score1"])
-            comparisons[image].append(ReferenceComparison(reference_score=float(row["score2"]), prediction=prediction))
-    estimates = estimate_absolute_scores_from_references(
-        comparisons,
-        theta=config.pairs.theta,
-        score_min=config.dataset.score_min,
-        score_max=config.dataset.score_max,
-        grid_size=config.evaluation.bt_grid_size,
-    )
-    images = sorted(estimates)
-    y_true = [true_scores[image] for image in images]
-    y_pred = [estimates[image] for image in images]
-    metrics: dict[str, Any] = {
-        "count": len(images),
-        "mae": mean_absolute_error(y_true, y_pred),
-        "rmse": root_mean_squared_error(y_true, y_pred),
-    }
-    try:
-        metrics["pc"] = pearson_correlation(y_true, y_pred)
-    except ValueError as exc:
-        metrics["pc"] = None
-        metrics["pc_error"] = str(exc)
-    _write_json(metrics_output, metrics)
-    return metrics
 
 
 def main() -> int:
@@ -169,17 +135,6 @@ def main() -> int:
     model = PeftModel.from_pretrained(base_model, checkpoint, is_trainable=False)
     load_projector_state(model, checkpoint)
 
-    fieldnames = [
-        "image1",
-        "image2",
-        "score1",
-        "score2",
-        "label",
-        "prediction",
-        "valid",
-        "generation",
-        *ANSWER_LOGPROB_COLUMNS.values(),
-    ]
     confusion = {gold: Counter({pred: 0 for pred in VALID_ANSWERS}) for gold in VALID_ANSWERS}
     processed = 0
     correct = 0
@@ -187,7 +142,7 @@ def main() -> int:
     next_progress = max(1, args.progress_pairs)
 
     with predictions.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer = csv.DictWriter(handle, fieldnames=PREDICTION_CSV_FIELDS)
         writer.writeheader()
         for start in range(0, total_pairs, batch_size):
             batch_pairs = pairs[start : start + batch_size]
@@ -196,19 +151,7 @@ def main() -> int:
                 loss_sum += -result.answer_logprobs[pair.answer]
                 correct += int(result.prediction == pair.answer)
                 confusion[pair.answer][result.prediction] += 1
-                row = {
-                    "image1": pair.image1,
-                    "image2": pair.image2,
-                    "score1": pair.score1,
-                    "score2": pair.score2,
-                    "label": pair.answer,
-                    "prediction": result.prediction,
-                    "valid": True,
-                    "generation": "",
-                }
-                for answer, column in ANSWER_LOGPROB_COLUMNS.items():
-                    row[column] = result.answer_logprobs[answer]
-                writer.writerow(row)
+                writer.writerow(prediction_csv_row(pair, result))
                 processed += 1
             if processed >= next_progress or processed >= total_pairs:
                 handle.flush()
@@ -244,7 +187,12 @@ def main() -> int:
     _write_json(progress_output, metrics_payload)
     print(json.dumps(metrics_payload, sort_keys=True), flush=True)
 
-    metrics = _estimate_scores(predictions, metrics_output, config)
+    metrics = estimate_metrics_from_predictions_csv(
+        predictions,
+        delta=config.evaluation.bt_delta,
+        k=config.evaluation.bt_k,
+        output_path=metrics_output,
+    )
     complete_payload = _progress_payload(
         phase="complete",
         total_pairs=total_pairs,

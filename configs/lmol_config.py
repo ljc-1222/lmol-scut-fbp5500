@@ -8,6 +8,8 @@ from typing import Any, Mapping
 
 import yaml
 
+from data.pairs import DEFAULT_INSTRUCTION
+
 
 @dataclass(frozen=True)
 class DatasetConfig:
@@ -31,7 +33,6 @@ class PairConfig:
     theta: float
     train_pairs_per_label: int
     instruction: str
-    answers: tuple[str, str, str]
     output_dir: Path
     seed: int
 
@@ -41,7 +42,6 @@ class ModelConfig:
     """Model and QLoRA settings."""
 
     model_id: str
-    image_size: int
     load_in_4bit: bool
     lora_r: int
     lora_alpha: int
@@ -65,7 +65,6 @@ class TrainingConfig:
     gradient_checkpointing: bool
     save_steps: int
     log_steps: int
-    objective: str
 
 
 @dataclass(frozen=True)
@@ -88,8 +87,13 @@ class EvaluationConfig:
     output_dir: Path
     batch_size: int
     max_new_tokens: int
-    reference_count: int
-    bt_grid_size: int
+    reference_bin_width: float
+    reference_max_per_bin: int | None
+    reference_seed: int
+    score_min: float
+    score_max: float
+    bt_delta: float
+    bt_k: float
     eval_steps: int
     eval_max_pairs: int
 
@@ -122,6 +126,40 @@ def _tuple_str(values: Any) -> tuple[str, ...]:
     if isinstance(values, str):
         return (values,)
     return tuple(str(v) for v in values)
+
+
+def _positive_float(name: str, value: Any) -> float:
+    resolved = float(value)
+    if resolved <= 0.0:
+        raise ValueError(f"{name} must be positive, got {resolved}")
+    return resolved
+
+
+def _optional_positive_int(name: str, value: Any) -> int | None:
+    if value is None:
+        return None
+    resolved = int(value)
+    if resolved <= 0:
+        raise ValueError(f"{name} must be positive when set, got {resolved}")
+    return resolved
+
+
+def _validate_score_bounds(score_min: Any, score_max: Any) -> tuple[float, float]:
+    resolved_min = float(score_min)
+    resolved_max = float(score_max)
+    if resolved_min >= resolved_max:
+        raise ValueError(f"evaluation.score_min must be less than evaluation.score_max, got {resolved_min} >= {resolved_max}")
+    return resolved_min, resolved_max
+
+
+def _reject_legacy_evaluation_keys(evaluation: Mapping[str, Any]) -> None:
+    legacy_keys = sorted(set(evaluation) & {"reference_count", "bt_grid_size"})
+    if legacy_keys:
+        raise ValueError(
+            "Legacy evaluation config keys are not supported by the UOL default path: "
+            f"{legacy_keys}. Use reference_max_per_bin for compute-saving reference caps; "
+            "UOL BT estimation uses reference-score support, not a dense grid."
+        )
 
 
 def validate_fold_index(config: LMOLConfig, fold_index: int | None = None) -> int:
@@ -172,6 +210,11 @@ def load_config(path: str | Path) -> LMOLConfig:
     training = _required(raw, "training")
     wandb = raw.get("wandb", {}) or {}
     evaluation = _required(raw, "evaluation")
+    _reject_legacy_evaluation_keys(evaluation)
+    evaluation_score_min, evaluation_score_max = _validate_score_bounds(
+        evaluation.get("score_min", dataset.get("score_min", 1.0)),
+        evaluation.get("score_max", dataset.get("score_max", 5.0)),
+    )
 
     return LMOLConfig(
         experiment_name=str(_required(raw, "experiment_name")),
@@ -190,14 +233,12 @@ def load_config(path: str | Path) -> LMOLConfig:
         pairs=PairConfig(
             theta=float(pairs.get("theta", 0.2)),
             train_pairs_per_label=int(pairs.get("train_pairs_per_label", 30000)),
-            instruction=str(pairs.get("instruction", "<image1><image2>\nWhich face looks more attractive?")),
-            answers=_tuple_str(pairs.get("answers", ["First.", "Second.", "Similar."])),
+            instruction=str(pairs.get("instruction", DEFAULT_INSTRUCTION)),
             output_dir=_path(pairs.get("output_dir", "artifacts/pairs")),
             seed=int(pairs.get("seed", raw.get("seed", 42))),
         ),
         model=ModelConfig(
             model_id=str(model.get("model_id", "llava-hf/llava-1.5-7b-hf")),
-            image_size=int(model.get("image_size", 336)),
             load_in_4bit=bool(model.get("load_in_4bit", True)),
             lora_r=int(model.get("lora_r", 8)),
             lora_alpha=int(model.get("lora_alpha", 32)),
@@ -217,7 +258,6 @@ def load_config(path: str | Path) -> LMOLConfig:
             gradient_checkpointing=bool(training.get("gradient_checkpointing", False)),
             save_steps=int(training.get("save_steps", 500)),
             log_steps=int(training.get("log_steps", 10)),
-            objective=str(training.get("objective", "choice_token")),
         ),
         wandb=WandBConfig(
             enabled=bool(wandb.get("enabled", True)),
@@ -232,8 +272,13 @@ def load_config(path: str | Path) -> LMOLConfig:
             output_dir=_path(evaluation.get("output_dir", "outputs/evaluation")),
             batch_size=int(evaluation.get("batch_size", 2)),
             max_new_tokens=int(evaluation.get("max_new_tokens", 4)),
-            reference_count=int(evaluation.get("reference_count", 340)),
-            bt_grid_size=int(evaluation.get("bt_grid_size", 401)),
+            reference_bin_width=_positive_float("evaluation.reference_bin_width", evaluation.get("reference_bin_width", 0.1)),
+            reference_max_per_bin=_optional_positive_int("evaluation.reference_max_per_bin", evaluation.get("reference_max_per_bin")),
+            reference_seed=int(evaluation.get("reference_seed", raw.get("seed", 42))),
+            score_min=evaluation_score_min,
+            score_max=evaluation_score_max,
+            bt_delta=_positive_float("evaluation.bt_delta", evaluation.get("bt_delta", 2.0)),
+            bt_k=_positive_float("evaluation.bt_k", evaluation.get("bt_k", 10.0)),
             eval_steps=int(evaluation.get("eval_steps", 500)),
             eval_max_pairs=int(evaluation.get("eval_max_pairs", 256)),
         ),
