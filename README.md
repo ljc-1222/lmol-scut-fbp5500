@@ -1,6 +1,6 @@
 # LMOL on SCUT-FBP5500
 
-This repository implements **Large Multimodal Model based Order Learning (LMOL)** for facial beauty prediction on **SCUT-FBP5500**. It is a focused research-code release for reproducing the included fold0 experiment, not a general-purpose facial attractiveness package.
+This repository implements **Large Multimodal Model based Order Learning (LMOL)** for facial beauty prediction on **SCUT-FBP5500**. It is a focused research-code release, not a general-purpose facial attractiveness package.
 
 ## Paper And Method
 
@@ -14,151 +14,44 @@ This repository follows the paper's core setup:
 
 - Base model: LLaVA-1.5-7B with CLIP ViT-L/14-336px and Vicuna-1.5 backbone.
 - Input format: two face images are encoded separately with shared visual encoder/projector weights; images are not concatenated at pixel level.
+- Default prompt: `<image1><image2>, which face looks more attractive?`.
 - Pair labels: `First.`, `Second.`, and `Similar.` from SCUT score differences with `theta=0.2`.
-- Training objective: the default `choice_token` objective trains the LLaVA LM head as a 3-way next-token classifier over the first answer word tokens.
+- Training objective: first-token choice trains the LLaVA LM head as a 3-way next-token classifier over the first answer word tokens.
 - Trainable modules: the CLIP visual encoder is frozen; the full multimodal projector and QLoRA adapters on the language model are trained.
 - LoRA setting: `r=8`, `lora_alpha=32`, `lora_dropout=0.05`, targeting language-model `q_proj`, `k_proj`, `v_proj`, and `o_proj`.
-- Score estimation: pairwise orders are converted to SCUT scores using Bradley-Terry-style reference comparison and reported with PC, MAE, and RMSE.
+- Reference selection: UOL-style score-bin references are selected from the fold training split only, using 0.1-wide score bins by default.
+- Score estimation: final scores are recovered with UOL-style Bradley-Terry maximum likelihood over the reference-score support and reported with PC, MAE, and RMSE.
+- Image size: fixed at 336 for LLaVA-1.5 with CLIP ViT-L/14-336px.
 
 ## Implementation Notes: Objective, Labels, And Inference
 
-The paper describes the answer target as standard conditional language modeling over the natural-language answer string. This repository keeps the same three semantic answers, but the released training/evaluation path uses a narrower token-choice formulation:
+The original LMOL formulation is described as conditional language modeling over answer text. This repository uses first-answer-token classification for efficiency and stability. The answer vocabulary is restricted to `First.`, `Second.`, and `Similar.`
+
+The paper-aligned parts of the default path are the prompt, pair semantics, train-only UOL reference selection, and UOL Bradley-Terry score recovery. The deliberate implementation exception is first-token training and inference:
 
 - Class labels are ordered as `First.` = 0, `Second.` = 1, and `Similar.` = 2. They are built from SCUT score differences: `score1 - score2 > theta` gives `First.`, `< -theta` gives `Second.`, and `abs(score1 - score2) <= theta` gives `Similar.`.
 - With the LLaVA tokenizer used by the checkpoint, `First.`, `Second.`, and `Similar.` are each two tokens: the answer word token plus a shared period token. The default objective and pairwise evaluator score only the first answer word token (`First`, `Second`, or `Similar`); the period token is not part of the loss or prediction score.
-- `training.objective: choice_token` runs one forward pass on the prompt/answer batch, discards the masked LM labels, takes logits at the prompt boundary, restricts them to the three answer word token IDs, and applies 3-way cross entropy.
+- Training runs one forward pass on the prompt/answer batch, discards the masked LM labels, takes logits at the prompt boundary, restricts them to the three answer word token IDs, and applies 3-way cross entropy.
 - Pairwise inference is prompt-only likelihood scoring, not `model.generate`. It takes the final prompt-position logits, normalizes only across the three answer word tokens, and selects the largest normalized log-probability.
-- The `conditional_lm` branch uses the same current collator mask, so it also supervises only the first answer word token unless the collator is changed to keep all answer tokens. Treat it as a diagnostic branch rather than a full reproduction of the paper's multi-token conditional-LM objective.
+- Full conditional language modeling over the answer text is not part of the default supported path. Report results from this repository under the first-token implementation choice.
 
 See [`docs/TRAINING_ALIGNMENT.md`](docs/TRAINING_ALIGNMENT.md) for the paper-to-code alignment notes and the implementation evidence.
 
 ## Repository Scope
 
-The repository contains:
-
-- SCUT-FBP5500 dataset validation and download helpers.
-- Deterministic 5-fold split and offline pair construction.
-- LLaVA/QLoRA LMOL model setup.
-- Fold training and evaluation scripts.
-- Fold0 evaluation results and small release copies of the final JSON metrics.
-- Hugging Face Dataset-repo upload/download instructions for the fold0 checkpoint package.
+The repository contains dataset setup helpers, deterministic folds, offline pair construction, LLaVA/QLoRA model setup, training scripts, and evaluation scripts.
 
 The repository does not redistribute SCUT-FBP5500 images or labels as a public dataset package, and it does not include the trained checkpoint in GitHub. Download the dataset under the dataset authors' terms and download the fold0 checkpoint from Hugging Face.
 
 ## Documentation
 
-Additional public documentation is indexed in [`docs/README.md`](docs/README.md). The most relevant notes are [`docs/TRAINING_ALIGNMENT.md`](docs/TRAINING_ALIGNMENT.md) for paper-to-code alignment and [`docs/ASSUMPTIONS.md`](docs/ASSUMPTIONS.md) for reproducibility assumptions.
+Additional public documentation is indexed in [`docs/README.md`](docs/README.md). The key notes are [`docs/TRAINING_ALIGNMENT.md`](docs/TRAINING_ALIGNMENT.md) for paper-to-code alignment and [`docs/ASSUMPTIONS.md`](docs/ASSUMPTIONS.md) for reproducibility assumptions.
 
 ## Fold 0 Release Result
 
-The repository currently reports **fold 0 only**, not full 5-fold cross-validation. The authoritative score metrics were extracted from `outputs/evaluation/fold_0/metrics.json`; small GitHub-visible release copies are kept in [`docs/results/fold_0/`](docs/results/fold_0/).
+The repository reports fold 0 only, not full 5-fold cross-validation. The last recorded fold0 run reported `PC=0.9568`, `MAE=0.1643`, `RMSE=0.2130`, and pairwise accuracy `0.8649`.
 
-<div align="center">
-
-<table>
-  <thead>
-    <tr>
-      <th>Split</th>
-      <th align="right">PC ↑</th>
-      <th align="right">MAE ↓</th>
-      <th align="right">RMSE ↓</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>Fold 0</td>
-      <td align="right">0.9568</td>
-      <td align="right">0.1643</td>
-      <td align="right">0.2130</td>
-    </tr>
-  </tbody>
-</table>
-
-</div>
-
-Pairwise classification metrics were computed from [`confusion_matrix.json`](docs/results/fold_0/confusion_matrix.json) and [`progress.json`](docs/results/fold_0/progress.json).
-
-<div align="center">
-
-<table>
-  <thead>
-    <tr>
-      <th>Split</th>
-      <th align="right">Accuracy ↑</th>
-      <th align="right">Macro Precision ↑</th>
-      <th align="right">Macro Recall ↑</th>
-      <th align="right">Macro F1 ↑</th>
-      <th align="right">Weighted F1 ↑</th>
-      <th align="right">Pairwise NLL ↓</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>Fold 0</td>
-      <td align="right">0.8649</td>
-      <td align="right">0.8145</td>
-      <td align="right">0.8354</td>
-      <td align="right">0.8195</td>
-      <td align="right">0.8723</td>
-      <td align="right">0.3384</td>
-    </tr>
-  </tbody>
-</table>
-
-</div>
-
-Per-answer pairwise metrics:
-
-<div align="center">
-
-<table>
-  <thead>
-    <tr>
-      <th>Gold Label</th>
-      <th align="right">Support</th>
-      <th align="right">Predicted</th>
-      <th align="right">Precision ↑</th>
-      <th align="right">Recall ↑</th>
-      <th align="right">F1 ↑</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td><code>First.</code></td>
-      <td align="right">120,836</td>
-      <td align="right">110,502</td>
-      <td align="right">0.9335</td>
-      <td align="right">0.8537</td>
-      <td align="right">0.8918</td>
-    </tr>
-    <tr>
-      <td><code>Second.</code></td>
-      <td align="right">194,770</td>
-      <td align="right">185,020</td>
-      <td align="right">0.9557</td>
-      <td align="right">0.9079</td>
-      <td align="right">0.9312</td>
-    </tr>
-    <tr>
-      <td><code>Similar.</code></td>
-      <td align="right">58,394</td>
-      <td align="right">78,478</td>
-      <td align="right">0.5541</td>
-      <td align="right">0.7446</td>
-      <td align="right">0.6354</td>
-    </tr>
-  </tbody>
-</table>
-
-</div>
-
-Additional fold0 evidence:
-
-- Split: deterministic 5-fold SCUT-FBP5500 split with `split_seed: 42`.
-- Images: 4,400 train images and 1,100 test images.
-- Pair construction: 90,000 balanced fold0 training pairs and 374,000 fold0 test-reference pairs using 340 train-reference images.
-- Evaluated checkpoint: `outputs/lmol_scut_fbp5500/fold_0/last`.
-- Release result files: [`metrics.json`](docs/results/fold_0/metrics.json), [`confusion_matrix.json`](docs/results/fold_0/confusion_matrix.json), and [`progress.json`](docs/results/fold_0/progress.json).
+Current defaults build test-reference pairs from all train-split score-bin references. Regenerate evaluation outputs before reporting updated UOL-default numbers.
 
 ## Fold 0 Checkpoint
 
@@ -204,11 +97,11 @@ chat_template.json
 README.md
 ```
 
-The local checkpoint package prepared for upload is `outputs/lmol_scut_fbp5500/fold_0/last/`. Maintainer upload commands are in [`docs/HUGGING_FACE_UPLOAD.md`](docs/HUGGING_FACE_UPLOAD.md).
+The local checkpoint package path used by the examples is `checkpoints/fold0/`.
 
 ## Quick Reproduction
 
-From a fresh checkout, reproduce the reported fold0 metrics with:
+From a fresh checkout, run the fold0 pipeline with:
 
 ```bash
 python -m venv .venv
@@ -233,9 +126,9 @@ python scripts/evaluate_fold.py \
   --batch-size 8
 ```
 
-This writes `outputs/evaluation/fold_0/pairwise_predictions.csv`, `metrics.json`, `confusion_matrix.json`, and `progress.json`. Compare the resulting `outputs/evaluation/fold_0/metrics.json` to [`docs/results/fold_0/metrics.json`](docs/results/fold_0/metrics.json).
+This writes `outputs/evaluation/fold_0/pairwise_predictions.csv`, `metrics.json`, `confusion_matrix.json`, and `progress.json`.
 
-Full fold0 evaluation is long because it scores 374,000 target-reference pairs. Use `--limit 256` only for a checkpoint smoke test; it does not reproduce the reported metrics.
+Full fold0 evaluation is long because it scores every target against the selected train-split references. Use `--limit 256` only for a checkpoint smoke test; it does not reproduce full metrics.
 
 ## Environment
 
@@ -320,11 +213,14 @@ Fold outputs use this layout:
 artifacts/pairs/full/fold_0/
 ├── train_images.csv
 ├── test_images.csv
+├── references.csv
 ├── train_pairs.csv
 └── test_reference_pairs.csv
 ```
 
 For the full config, each `train_pairs.csv` contains 90,000 pairs whenever enough candidates exist: 30,000 `First.`, 30,000 `Second.`, and 30,000 `Similar.`.
+
+The default `references.csv` is built from the fold training split only. Training-set scores are discretized into 0.1-wide bins over the SCUT score range, and all images in each non-empty bin are kept as references. Test images are never used as references in the same fold. Setting `evaluation.reference_max_per_bin` caps references per bin with a deterministic seed; that is a compute-saving ablation, not the strict default.
 
 ## Training
 
@@ -402,6 +298,8 @@ Metrics:
 - `mae`: Mean Absolute Error.
 - `rmse`: Root Mean Squared Error.
 
+Score recovery uses UOL Bradley-Terry. For each target image, the model-predicted target-reference labels are parsed as `First.` = target greater than reference, `Second.` = target less than reference, and `Similar.` = similar. The UOL Bradley-Terry likelihood is maximized over the reference-score support; the old ad-hoc dense-grid estimator is not used by the default scripts.
+
 ## Tests
 
 CPU-safe unit tests:
@@ -410,12 +308,11 @@ CPU-safe unit tests:
 python -m unittest discover -s tests
 ```
 
-The tests cover theta label construction, exact instruction and answer formatting, balanced offline sampling, SCUT annotation validation, PC/MAE/RMSE, Bradley-Terry ranking, and import/config sanity.
+The tests cover theta label construction, prompt config flow, answer validation, fixed 336 image size, first-token collator masking, balanced offline sampling, train/test/reference leakage checks, score-bin reference selection, SCUT annotation validation, PC/MAE/RMSE, UOL Bradley-Terry probabilities and likelihood, shared evaluation wrappers, prediction CSV compatibility, and import/config sanity.
 
 ## Release Notes
 
 - Do not commit `checkpoints/`, `outputs/`, `artifacts/`, `wandb/`, `data/raw/`, or model weight files. These are ignored by `.gitignore`.
-- Keep the small fold0 release result files under `docs/results/fold_0/` so the reported README table has stable GitHub-visible evidence.
 - The SCUT-FBP5500 dataset has external usage terms; this repository documents download/setup but should not redistribute the raw dataset.
 - No license file is currently present. Choose and add a license before publishing if you want others to know their reuse rights.
 

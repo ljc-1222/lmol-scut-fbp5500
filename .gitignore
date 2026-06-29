@@ -148,6 +148,20 @@ cython_debug/
 # VS Code
 .vscode/
 
+# Local agent/session files
+.agents/
+.codex/
+
+# Local cluster scripts and scheduler logs
+slurm/
+.slurm/
+
+# Local reference copies and generated release artifacts
+reference/
+docs/results/
+docs/HF_*.md
+docs/HUGGING_FACE_UPLOAD.md
+
 # =============================================================================
 # MACHINE LEARNING & DATA SCIENCE SPECIFIC
 # =============================================================================
@@ -259,9 +273,6 @@ Thumbs.db
 *.tmp
 *.temp
 
-# Keep small documented release results visible on GitHub.
-!docs/results/
-!docs/results/**
 *.swp
 *.swo
 *~
