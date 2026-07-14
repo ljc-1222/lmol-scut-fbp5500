@@ -1,278 +1,62 @@
-# Byte-compiled / optimized / DLL files
+# Python and tools
 __pycache__/
-**/__pycache__/
 *.py[cod]
-*$py.class
-
-# C extensions
-*.so
-
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# PyInstaller
-*.manifest
-*.spec
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
 .pytest_cache/
-cover/
-
-# Translations
-*.mo
-*.pot
-
-# Django stuff
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-
-# Flask stuff
-instance/
-.webassets-cache
-
-# Scrapy stuff
-.scrapy
-
-# Sphinx documentation
-docs/_build/
-
-# PyBuilder
-.pybuilder/
-target/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-.ipynb_checkpoints/
-**/.ipynb_checkpoints/
-
-# IPython
-profile_default/
-ipython_config.py
-
-# pyenv
-# .python-version
-
-# pipenv
-# Pipfile.lock
-
-# poetry
-# poetry.lock
-
-# pdm
-# pdm.lock
-.pdm.toml
-
-# PEP 582
-__pypackages__/
-
-# Celery stuff
-celerybeat-schedule
-celerybeat.pid
-
-# SageMath parsed files
-*.sage.py
-
-# Environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
+.coverage*
+htmlcov/
 .mypy_cache/
-.dmypy.json
-dmypy.json
+.ruff_cache/
 
-# Pyre type checker
-.pyre/
-
-# pytype static type analyzer
-.pytype/
-
-# Cython debug symbols
-cython_debug/
-
-# PyCharm
+# Local environments and editors
+.env
+.env.*
+.venv/
+venv/
 .idea/
-*.iml
-*.ipr
-*.iws
-
-# VS Code
 .vscode/
-
-# Local agent/session files
 .agents/
 .codex/
 
-# Local cluster scripts and scheduler logs
+# Project outputs
+data/raw/
+data/processed/
+artifacts/
+checkpoints/
+outputs/
+wandb/
+logs/
+runs/
 slurm/
 .slurm/
 
-# Local reference copies and generated release artifacts
+# Local references and release staging
 reference/
 docs/results/
 docs/HF_*.md
 docs/HUGGING_FACE_UPLOAD.md
 
-# =============================================================================
-# MACHINE LEARNING & DATA SCIENCE SPECIFIC
-# =============================================================================
-
-# Model weights and checkpoints
+# Model and array artifacts
 *.safetensors
 *.bin
-*.pth
 *.pt
+*.pth
 *.ckpt
-*.h5
-*.hdf5
-*.pb
-*.pkl
-*.pickle
-*.joblib
 *.npy
 *.npz
 *.onnx
-*.tflite
-*.mlmodel
-*.coreml
 
-# Model checkpoints directory
-checkpoints/
-model/checkpoints/
-outputs/
-artifacts/
-
-# Hugging Face model cache
-.cache/
-huggingface/
-transformers_cache/
-
-# TensorBoard logs
-logs/
-runs/
-tensorboard_logs/
-tb_logs/
-
-# MLflow
-mlruns/
-mlartifacts/
-
-# Weights & Biases
-wandb/
-
-# Comet ML
-.comet/
-
-# Neptune
-.neptune/
-
-# =============================================================================
-# RAW DATA & DATASETS
-# =============================================================================
-
-# Raw data directories
-data/raw/
-data/pairs/
-raw_data/
-datasets/raw/
-original_data/
-
-# Processed data directories (if large)
-data/processed/
-processed_data/
-datasets/processed/
-
-# Large archive files
+# Archives and temporary files
 *.zip
+*.tar
 *.tar.gz
-*.tar.bz2
-*.rar
-*.7z
-
-# =============================================================================
-# EXPERIMENT TRACKING & CONFIGURATION
-# =============================================================================
-
-# Experiment outputs
-outputs/
-experiments/
-results/
-artifacts/
-
-# Configuration files with sensitive data
-config/secrets.yaml
-config/local.yaml
-config/production.yaml
-secrets.json
-.env.local
-.env.production
-
-# =============================================================================
-# SYSTEM & TEMPORARY FILES
-# =============================================================================
-
-# OS generated files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# Temporary files
+*.tgz
 *.tmp
 *.temp
-
 *.swp
 *.swo
 *~
+
+# OS metadata
+.DS_Store
+._*
+Thumbs.db
