@@ -71,8 +71,7 @@ def _freeze_vision_tower(model: Any) -> None:
             parameter.requires_grad = False
 
 
-def _enable_projector_training(model: Any, projector_name: str) -> None:
-    del projector_name
+def _enable_projector_training(model: Any) -> None:
     projector = _get_projector(model)
     for parameter in projector.parameters():
         if parameter.dtype.is_floating_point or parameter.dtype.is_complex:
@@ -239,7 +238,6 @@ def load_lmol_model(config: LMOLConfig, train: bool = True) -> tuple[Any, Any]:
         torch_dtype=torch.bfloat16 if config.training.precision == "bf16" else torch.float16,
         device_map="auto",
     )
-    projector_name = _find_projector_name(model)
     _freeze_vision_tower(model)
     if train and config.training.gradient_checkpointing:
         _disable_training_cache(model)
@@ -267,7 +265,7 @@ def load_lmol_model(config: LMOLConfig, train: bool = True) -> tuple[Any, Any]:
         model = get_peft_model(model, lora_config)
         if config.training.gradient_checkpointing:
             _disable_training_cache(model)
-        _enable_projector_training(model, projector_name)
+        _enable_projector_training(model)
         _freeze_vision_tower(model)
         _validate_trainable_scope(model)
     else:
@@ -310,7 +308,7 @@ def load_projector_state(model: Any, checkpoint_dir: str | Path) -> None:
         raise FileNotFoundError(f"Projector checkpoint not found: {path}")
     projector = _get_projector(model)
     state = torch.load(path, map_location="cpu", weights_only=True)
-    projector.load_state_dict(state, strict=False)
+    projector.load_state_dict(state)
 
 
 def save_lmol_checkpoint(model: Any, processor: Any, output_dir: str | Path) -> None:

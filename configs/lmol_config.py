@@ -86,7 +86,6 @@ class EvaluationConfig:
 
     output_dir: Path
     batch_size: int
-    max_new_tokens: int
     reference_bin_width: float
     reference_max_per_bin: int | None
     reference_seed: int
@@ -271,9 +270,8 @@ def load_config(path: str | Path) -> LMOLConfig:
         evaluation=EvaluationConfig(
             output_dir=_path(evaluation.get("output_dir", "outputs/evaluation")),
             batch_size=int(evaluation.get("batch_size", 2)),
-            max_new_tokens=int(evaluation.get("max_new_tokens", 4)),
             reference_bin_width=_positive_float("evaluation.reference_bin_width", evaluation.get("reference_bin_width", 0.1)),
-            reference_max_per_bin=_optional_positive_int("evaluation.reference_max_per_bin", evaluation.get("reference_max_per_bin")),
+            reference_max_per_bin=_optional_positive_int("evaluation.reference_max_per_bin", evaluation.get("reference_max_per_bin", 10)),
             reference_seed=int(evaluation.get("reference_seed", raw.get("seed", 42))),
             score_min=evaluation_score_min,
             score_max=evaluation_score_max,

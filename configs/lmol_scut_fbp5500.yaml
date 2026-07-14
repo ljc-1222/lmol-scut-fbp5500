@@ -53,9 +53,8 @@ wandb:
 evaluation:
   output_dir: outputs/evaluation
   batch_size: 2
-  max_new_tokens: 4
   reference_bin_width: 0.1
-  reference_max_per_bin:
+  reference_max_per_bin: 10
   reference_seed: 42
   score_min: 1.0
   score_max: 5.0

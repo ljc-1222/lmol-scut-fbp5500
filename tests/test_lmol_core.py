@@ -27,7 +27,7 @@ from data.pairs import (
     make_instruction,
     read_pairs_csv,
 )
-from data.references import assert_no_reference_leakage, score_bin_index, select_score_bin_references
+from data.references import assert_no_reference_leakage, score_bin_index, score_bin_label, select_score_bin_references
 from data.scut_fbp5500 import SCUTRecord, load_annotations, validate_dataset
 from evaluation.inference import (
     PREDICTION_CSV_FIELDS,
@@ -45,9 +45,10 @@ from evaluation.uol_bradley_terry import (
     uol_bt_class_probabilities,
     uol_bt_log_likelihood,
 )
-from model.lmol import _bnb_4bit_skip_modules, _language_lora_target_modules, _validate_processor_image_size, _validate_trainable_scope
+from model.lmol import _bnb_4bit_skip_modules, _language_lora_target_modules, _validate_processor_image_size, _validate_trainable_scope, load_projector_state
 from scripts.build_pairs import build_pairs_for_folds
 from scripts.download_scut_fbp5500 import delete_archive_file, extract_dataset_archive
+from training.train import _accumulation_group
 
 
 class LMOLCoreTests(unittest.TestCase):
@@ -147,6 +148,27 @@ class LMOLCoreTests(unittest.TestCase):
         self.assertEqual(int(batch["labels"][0, 3]), 10)
         self.assertEqual(int(batch["choice_labels"][0]), 0)
         self.assertEqual(int(batch["choice_positions"][0]), 2)
+        self.assertEqual(LMOLDataCollator.find_answer_token_position(torch.tensor([10, 2, 10, 13]), 10), 2)
+
+    def test_partial_gradient_accumulation_group(self) -> None:
+        states = [_accumulation_group(index, batch_count=5, accumulation_steps=4) for index in range(1, 6)]
+
+        self.assertEqual(states, [(4, False), (4, False), (4, False), (4, True), (1, True)])
+
+    def test_projector_checkpoint_loading_is_strict(self) -> None:
+        import torch
+
+        class FakeModel(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.multi_modal_projector = torch.nn.Linear(2, 2)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint = Path(tmp)
+            torch.save({"unexpected": torch.ones(1)}, checkpoint / "projector.pt")
+
+            with self.assertRaises(RuntimeError):
+                load_projector_state(FakeModel(), checkpoint)
 
     def test_theta_label_construction(self) -> None:
         self.assertEqual(label_from_scores(4.0, 4.0, theta=0.2), ANSWER_SIMILAR)
@@ -288,7 +310,6 @@ training:
 evaluation:
   output_dir: {root / "eval"}
   batch_size: 1
-  max_new_tokens: 4
   reference_bin_width: 0.1
   reference_max_per_bin:
   reference_seed: 7
@@ -349,6 +370,7 @@ evaluation:
 
         self.assertEqual(score_bin_index(1.0, 1.0, 5.0, 0.1), 0)
         self.assertEqual(score_bin_index(5.0, 1.0, 5.0, 0.1), 39)
+        self.assertEqual(score_bin_label(1, 1.0, 0.01), "1.01")
         references = select_score_bin_references(
             train_records,
             fold=0,
@@ -736,7 +758,7 @@ evaluation:
         self.assertIn("scut-fbp5500", config.wandb.tags)
         self.assertEqual(config.pairs.instruction, "<image1><image2>, which face looks more attractive?")
         self.assertEqual(config.evaluation.reference_bin_width, 0.1)
-        self.assertIsNone(config.evaluation.reference_max_per_bin)
+        self.assertEqual(config.evaluation.reference_max_per_bin, 10)
         self.assertEqual(config.evaluation.bt_delta, 2.0)
         self.assertEqual(config.evaluation.bt_k, 10.0)
         self.assertEqual(config.evaluation.eval_steps, 500)

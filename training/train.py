@@ -133,6 +133,12 @@ def _set_random_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
+def _accumulation_group(batch_index: int, batch_count: int, accumulation_steps: int) -> tuple[int, bool]:
+    group_start = (batch_index - 1) // accumulation_steps * accumulation_steps
+    group_size = min(accumulation_steps, batch_count - group_start)
+    return group_size, batch_index == group_start + group_size
+
+
 def train_lmol(
     config: LMOLConfig,
     pairs_csv: str | Path,
@@ -170,10 +176,10 @@ def train_lmol(
         (len(dataset) + config.training.per_device_batch_size - 1) // config.training.per_device_batch_size,
     )
     configured_max = config.training.max_steps if max_steps is None else max_steps
-    total_steps = configured_max or max(
-        1,
-        loader_batches * config.training.num_epochs // config.training.gradient_accumulation_steps,
-    )
+    steps_per_epoch = (
+        loader_batches + config.training.gradient_accumulation_steps - 1
+    ) // config.training.gradient_accumulation_steps
+    total_steps = configured_max or max(1, steps_per_epoch * config.training.num_epochs)
     run_limit = stop_after_steps if stop_after_steps is not None else configured_max
 
     output_dir = config.training.output_dir
@@ -224,11 +230,16 @@ def train_lmol(
                 next_token_logits = outputs.logits[row_indices, choice_positions, :].float()
                 choice_logits = next_token_logits.index_select(dim=-1, index=choice_token_ids)
                 raw_loss = F.cross_entropy(choice_logits, choice_labels)
-                scaled_loss = raw_loss / config.training.gradient_accumulation_steps
+                accumulation_size, should_step = _accumulation_group(
+                    batch_index,
+                    len(loader),
+                    config.training.gradient_accumulation_steps,
+                )
+                scaled_loss = raw_loss / accumulation_size
                 pending_loss_sum += float(raw_loss.detach().cpu())
                 pending_loss_count += 1
                 scaled_loss.backward()
-                if batch_index % config.training.gradient_accumulation_steps == 0:
+                if should_step:
                     optimizer.step()
                     scheduler.step()
                     optimizer.zero_grad(set_to_none=True)

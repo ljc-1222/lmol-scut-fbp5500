@@ -6,6 +6,7 @@ import csv
 import math
 import random
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -36,7 +37,7 @@ def score_bin_index(score: float, score_min: float, score_max: float, bin_width:
 def score_bin_label(index: int, score_min: float, bin_width: float) -> str:
     """Return a stable label using the lower edge of the score bin."""
 
-    return f"{score_min + index * bin_width:.1f}"
+    return format(Decimal(str(score_min)) + index * Decimal(str(bin_width)), "f")
 
 
 def assert_no_reference_leakage(
@@ -69,7 +70,7 @@ def select_score_bin_references(
     max_per_bin: int | None = None,
     seed: int = 42,
 ) -> list[ReferenceRecord]:
-    """Select references from all non-empty train-score bins."""
+    """Select references from each non-empty train-score bin."""
 
     if max_per_bin is not None and max_per_bin <= 0:
         raise ValueError(f"max_per_bin must be positive when set, got {max_per_bin}")

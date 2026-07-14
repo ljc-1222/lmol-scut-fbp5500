@@ -80,15 +80,6 @@ class LMOLDataCollator:
         return f"{clean_prompt}{separator}{answer}"
 
     @staticmethod
-    def prompt_prefix_for_masking(prompt: str) -> str:
-        """Return the exact prefix span that should be masked from loss."""
-
-        clean_prompt = prompt.rstrip()
-        if clean_prompt.endswith("ASSISTANT:"):
-            return clean_prompt
-        return f"{clean_prompt}\n"
-
-    @staticmethod
     def answer_token_ids(tokenizer: Any) -> list[int]:
         """Return the single next-token IDs used for discriminative choice loss."""
 
@@ -107,7 +98,7 @@ class LMOLDataCollator:
         matches = (input_ids == answer_token_id).nonzero(as_tuple=True)[0]
         if len(matches) == 0:
             raise ValueError(f"Answer token id {answer_token_id} was not found in processor input IDs")
-        return int(matches[0].item())
+        return int(matches[-1].item())
 
     def __call__(self, examples: list[dict[str, Any]]) -> dict[str, Any]:
         """Tokenize a batch and mask labels so only the first answer token is supervised."""
