@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 from collections import Counter
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
@@ -53,13 +54,21 @@ class PairwiseEvalMetrics:
     prediction_counts: dict[str, int]
 
 
-def _load_pair_images(pair: PairExample) -> list[Any]:
-    """Load the two RGB images for one pair and close file handles immediately."""
+# ponytail: 512 keeps the default fold references hot; raise it only for larger reference sets.
+@lru_cache(maxsize=512)
+def _load_rgb_image(path: Path) -> Any:
+    """Load and cache one RGB image for repeated target-reference comparisons."""
 
     from PIL import Image
 
-    with Image.open(pair.image1_path) as raw_image1, Image.open(pair.image2_path) as raw_image2:
-        return [raw_image1.convert("RGB"), raw_image2.convert("RGB")]
+    with Image.open(path) as image:
+        return image.convert("RGB")
+
+
+def _load_pair_images(pair: PairExample) -> list[Any]:
+    """Load the two RGB images for one pair."""
+
+    return [_load_rgb_image(pair.image1_path), _load_rgb_image(pair.image2_path)]
 
 
 def select_balanced_pairs(pairs: Sequence[PairExample], max_pairs: int | None = None) -> list[PairExample]:

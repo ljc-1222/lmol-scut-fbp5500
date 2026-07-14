@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from statistics import mean
 from typing import Sequence
 
+import numpy as np
+
 from data.pairs import ANSWER_FIRST, ANSWER_SECOND, ANSWER_SIMILAR
 
 DEFAULT_BT_DELTA = 2.0
@@ -118,12 +120,32 @@ def estimate_score_uol_bt(
     support = tuple(sorted({float(score) for score in candidate_scores})) if candidate_scores is not None else reference_score_support(comparisons)
     if not support:
         raise ValueError("candidate_scores cannot be empty")
-    scored = [
-        (score, uol_bt_log_likelihood(score, comparisons, delta=delta, k=k))
-        for score in support
-    ]
-    best = max(log_likelihood for _score, log_likelihood in scored)
-    tied = [score for score, log_likelihood in scored if abs(log_likelihood - best) <= tie_tolerance]
+    if not comparisons:
+        raise ValueError("At least one reference comparison is required")
+    if delta <= 0.0:
+        raise ValueError(f"delta must be positive, got {delta}")
+    if k <= 0.0:
+        raise ValueError(f"k must be positive, got {k}")
+    invalid = next((item.prediction for item in comparisons if item.prediction not in VALID_PREDICTIONS), None)
+    if invalid is not None:
+        raise ValueError(f"Invalid predicted answer for UOL BT estimation: {invalid!r}")
+
+    candidates = np.asarray(support, dtype=np.float64)
+    references = np.asarray([item.reference_score for item in comparisons], dtype=np.float64)
+    score_diff = candidates[:, None] - references[None, :]
+    lower = 1.0 / (1.0 + np.exp(-np.clip(-delta + k * score_diff, -709.0, 709.0)))
+    upper = 1.0 / (1.0 + np.exp(-np.clip(delta + k * score_diff, -709.0, 709.0)))
+    predictions = np.asarray([item.prediction for item in comparisons])
+    probabilities = np.where(
+        predictions == ANSWER_FIRST,
+        lower,
+        np.where(predictions == ANSWER_SIMILAR, upper - lower, 1.0 - upper),
+    )
+    if not np.isfinite(probabilities).all():
+        raise FloatingPointError("UOL BT probabilities must be finite")
+    log_likelihoods = np.log(np.maximum(probabilities, 1e-12)).sum(axis=1)
+    best = float(log_likelihoods.max())
+    tied = [score for score, log_likelihood in zip(support, log_likelihoods) if abs(log_likelihood - best) <= tie_tolerance]
     return float(mean(tied))
 
 

@@ -31,6 +31,8 @@ from data.references import assert_no_reference_leakage, score_bin_index, score_
 from data.scut_fbp5500 import SCUTRecord, load_annotations, validate_dataset
 from evaluation.inference import (
     PREDICTION_CSV_FIELDS,
+    _load_pair_images,
+    _load_rgb_image,
     evaluate_pairwise_likelihood,
     predict_answer_by_likelihood,
     prediction_csv_row,
@@ -544,6 +546,11 @@ evaluation:
             )
             model = FakeModel()
             model.train()
+
+            _load_rgb_image.cache_clear()
+            _load_pair_images(pair_example)
+            _load_pair_images(pair_example)
+            self.assertEqual((_load_rgb_image.cache_info().hits, _load_rgb_image.cache_info().misses), (2, 2))
 
             result = predict_answer_by_likelihood(model, FakeProcessor(), pair_example)
 
