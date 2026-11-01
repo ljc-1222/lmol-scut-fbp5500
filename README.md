@@ -39,7 +39,7 @@ Requires **Python 3.11**, and a **CUDA GPU with sufficient VRAM** for LLaVA fine
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate                 # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 python -m pip install -r requirements.txt
 python scripts/check_environment.py --strict-runtime
 
@@ -88,4 +88,3 @@ The student project also explored **different class distributions, a two-class s
 
 **Data and weights:** [SCUT-FBP5500](https://github.com/HCIILAB/SCUT-FBP5500-Database-Release) is released for non-commercial research under the dataset authors' terms. The [LLaVA-1.5-7B checkpoint](https://huggingface.co/llava-hf/llava-1.5-7b-hf) has separate model/license terms. The historical [checkpoint package](https://huggingface.co/datasets/ljc-1222/LMOL-fbp5500) is a separate artifact; its original run configuration should not be conflated with the current example defaults. Facial-attractiveness labels are subjective human ratings and should not be treated as objective judgments or used for consequential decisions.
 
-No license is currently granted for reuse of this repository's source code; the dataset and model licenses are independent.
