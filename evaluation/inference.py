@@ -54,7 +54,7 @@ class PairwiseEvalMetrics:
     prediction_counts: dict[str, int]
 
 
-# ponytail: 512 keeps the default fold references hot; raise it only for larger reference sets.
+# Cache frequently reused reference images during target-reference comparisons.
 @lru_cache(maxsize=512)
 def _load_rgb_image(path: Path) -> Any:
     """Load and cache one RGB image for repeated target-reference comparisons."""
@@ -104,6 +104,19 @@ def select_balanced_pairs(pairs: Sequence[PairExample], max_pairs: int | None = 
     return selected[:max_pairs]
 
 
+def _last_non_pad_positions(batch: dict[str, Any]) -> Any:
+    """Return the final attended token index for each prompt row."""
+
+    import torch
+
+    attention_mask = batch.get("attention_mask")
+    input_ids = batch["input_ids"]
+    if attention_mask is None:
+        return torch.full((input_ids.shape[0],), input_ids.shape[1] - 1, dtype=torch.long)
+    positions = torch.arange(input_ids.shape[1], device=attention_mask.device).unsqueeze(0)
+    return (attention_mask.long() * positions).max(dim=1).values.long()
+
+
 def _choice_answer_logprobs_batch(
     model: Any,
     processor: Any,
@@ -123,7 +136,7 @@ def _choice_answer_logprobs_batch(
         images.extend(_load_pair_images(pair))
 
     batch = processor(text=texts, images=images, padding=True, return_tensors="pt")
-    choice_positions = LMOLDataCollator.prompt_choice_positions(batch)
+    choice_positions = _last_non_pad_positions(batch)
     choice_token_ids = torch.tensor(LMOLDataCollator.answer_token_ids(processor.tokenizer), dtype=torch.long)
     device = next(model.parameters()).device
     model_inputs = {key: value.to(device) if hasattr(value, "to") else value for key, value in batch.items()}

@@ -15,9 +15,9 @@ This note records the reproducibility boundary between the LMOL paper (DOI `10.1
 
 The paper describes conditional language modeling over the answer text. This repository uses the same prompt and answer semantics but trains a three-way classifier from LM-head logits at the prompt boundary:
 
-- `data/instruction_dataset.py` retains only the first answer-token label.
-- `training/train.py` applies cross entropy over the three answer-token IDs.
-- `evaluation/inference.py` normalizes those three logits and does not call `model.generate`.
+- `data/instruction_dataset.py` prepares the prompt only, the three candidate token IDs, and the class index. The correct answer is not appended to model input.
+- `training/train.py` computes cross-entropy over the three candidate logits at the final non-padding prompt position.
+- `evaluation/inference.py` uses the **same prompt position** and candidate token IDs, without calling `model.generate`.
 
 Results from this code should therefore be described as first-token LMOL comparator results, not full-answer conditional-LM results.
 
@@ -25,7 +25,9 @@ Results from this code should therefore be described as first-token LMOL compara
 
 - Folds are always deterministic seeded splits produced by `data/scut_fbp5500.py`; official fold files are not detected or loaded.
 - The default prompt is paper-style but configurable. Changing it is a prompt ablation.
-- Reference scores and images come from the training split. Test scores are used only for final metrics.
+- Reference scores and images come from the training split. Test scores are used only for final metrics; the training entry point does not automatically monitor the test-reference pair file.
 - The default reference cap is 10 images per non-empty 0.1-wide score bin. Set `evaluation.reference_max_per_bin: null` to remove the cap.
 - UOL parameters `evaluation.bt_delta: 2.0` and `evaluation.bt_k: 10.0` are implementation choices because paper-specific values were not available in the referenced LMOL materials.
 - Exact official fold seed, LoRA target list, offline pair order, and chat-template implementation were not publicly specified and should not be claimed as exact reproduction facts.
+
+The public repository contains only the balanced three-class baseline. The student project also explored alternative pair distributions, a two-class task, weighted cross-entropy, reversed-pair KL consistency and checkpoint ensembling; those variants are not provided as runnable options in this snapshot.
