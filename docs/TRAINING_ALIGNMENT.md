@@ -1,31 +1,36 @@
-# LMOL Method Alignment
+# Implementation notes: published LMOL vs. this repository
 
-This note records the reproducibility boundary between the LMOL paper (DOI `10.1109/ICASSP49660.2025.10889943`), the UOL formulation (arXiv `2409.00603`), and this implementation.
+This repository is an **LMOL-style reimplementation**, not a byte-for-byte reproduction of the [ICASSP 2025 paper](https://doi.org/10.1109/ICASSP49660.2025.10889943). The points below describe boundaries that are easy to miss when reading the code.
 
-## Paper-Aligned Path
+## Main adaptation: constrained answer-token classification
 
-- LLaVA-1.5-7B uses two separately encoded images at 336×336 resolution.
-- Offline training pairs are balanced across `First.`, `Second.`, and `Similar.` with `theta=0.2`.
-- The vision tower is frozen; the full multimodal projector and language-model LoRA adapters are trainable.
-- LoRA uses rank 8 and alpha 32, giving PEFT scaling `alpha / r = 4`.
-- AdamW uses separate projector and LoRA learning rates with cosine decay.
-- References come only from the fold training split; score recovery uses UOL Bradley-Terry likelihood over reference-score support.
+The original LMOL paper's Section II-D (Equations 9–10) specifies a conditional language-modeling objective over the answer sequence (`First.`, `Second.`, or `Similar.`). The published description presents natural-language answers, but does not fully specify an inference decoding implementation.
 
-## Deliberate Implementation Difference
+Here the task is explicitly reduced to **three candidate first tokens at the prompt boundary**:
 
-The paper describes conditional language modeling over the answer text. This repository uses the same prompt and answer semantics but trains a three-way classifier from LM-head logits at the prompt boundary:
+- [`data/instruction_dataset.py`](../data/instruction_dataset.py) prepares two images, the instruction prompt, the class index, and the candidate token IDs. The three IDs must be distinct.
+- [`training/train.py`](../training/train.py) takes the next-token logits at the **last non-padding prompt position** and computes cross-entropy over only the three candidate logits. It does not compute full-answer causal language-modeling loss.
+- [`evaluation/inference.py`](../evaluation/inference.py) uses the same prompt boundary and token IDs, applies a three-way log-softmax, and selects the maximum candidate. It does **not** call `model.generate`.
 
-- `data/instruction_dataset.py` retains only the first answer-token label.
-- `training/train.py` applies cross entropy over the three answer-token IDs.
-- `evaluation/inference.py` normalizes those three logits and does not call `model.generate`.
+The candidate probability is a **softmax conditional on these three candidates**, not the original model's full-vocabulary probability or the probability of the entire answer string. Punctuation and later answer tokens are not supervised. This choice removes free-form answer parsing at inference, but no controlled comparison of speed or quality against sequence-level LMOL training is established here.
 
-Results from this code should therefore be described as first-token LMOL comparator results, not full-answer conditional-LM results.
+## What remains aligned
 
-## Reproducibility Assumptions
+- Base model: LLaVA-1.5-7B, with two images passed through the shared CLIP vision tower and built-in multimodal projector.
+- Order labels: `First.`, `Second.`, `Similar.` with score-difference threshold `theta=0.2`.
+- Training data: offline balanced three-class pairs, rather than all possible image pairs.
+- Parameter-efficient updates: frozen vision tower, trainable projector and language-model attention LoRA; 4-bit loading when enabled.
+- Prediction-to-score pipeline: compare a test target to known-score training references, then estimate a scalar with a UOL-style Bradley–Terry likelihood.
 
-- Folds are always deterministic seeded splits produced by `data/scut_fbp5500.py`; official fold files are not detected or loaded.
-- The default prompt is paper-style but configurable. Changing it is a prompt ablation.
-- Reference scores and images come from the training split. Test scores are used only for final metrics.
-- The default reference cap is 10 images per non-empty 0.1-wide score bin. Set `evaluation.reference_max_per_bin: null` to remove the cap.
-- UOL parameters `evaluation.bt_delta: 2.0` and `evaluation.bt_k: 10.0` are implementation choices because paper-specific values were not available in the referenced LMOL materials.
-- Exact official fold seed, LoRA target list, offline pair order, and chat-template implementation were not publicly specified and should not be claimed as exact reproduction facts.
+## Explicit deviations and limits
+
+- **Splits:** this code creates seeded 80/20 folds. It does not load the paper's official/reported fold assignments.
+- **Training:** [the default YAML](../configs/lmol_scut_fbp5500.yaml) is a runnable example (1 epoch, effective batch size 16); it does **not** reproduce the 5-epoch, effective-batch-64 historical student experiments.
+- **Training-time validation:** disabled by default to avoid monitoring the held-out test-reference pairs. Optional monitoring requires a separately prepared validation pair file.
+- **Score estimation:** the current implementation searches the distinct reference-score values as candidate scores, with configurable `bt_delta` and `bt_k`. It is not identical to the historical report's fine-grained score grid. The original LMOL paper does not fully determine these implementation choices.
+- **Scope:** the two-class, imbalanced three-class, weighted CE, KL consistency, and checkpoint ensemble experiments conducted in the student project are not included as training modes in this public release.
+- **Performance:** no historical metric is represented as a verified outcome of the current default configuration.
+
+## Source
+
+Z. Liu, X. Liang, and J. Lin, *Large Multimodal Model is a Better Comparator on Facial Beauty Prediction*, ICASSP 2025 ([DOI](https://doi.org/10.1109/ICASSP49660.2025.10889943)). The order-learning/score-estimation lineage also includes [UOL](https://arxiv.org/abs/2409.00603). Check these publications for the original method rather than treating this repository's defaults as authoritative LMOL hyperparameters.

@@ -1,156 +1,91 @@
 # LMOL on SCUT-FBP5500
 
-Research implementation of **Large Multimodal Model based Order Learning (LMOL)** for facial beauty prediction on **SCUT-FBP5500**.
+**A LLaVA-1.5-7B reimplementation of pairwise facial-beauty comparison, with constrained first-token classification.**
 
-The implementation follows Liu, Liang, and Lin, [“Large Multimodal Model is a Better Comparator on Facial Beauty Prediction”](https://doi.org/10.1109/ICASSP49660.2025.10889943), ICASSP 2025. It compares two faces as `First.`, `Second.`, or `Similar.`, then recovers absolute scores from target-reference comparisons with UOL-style Bradley-Terry estimation.
+This repository contains the core training and evaluation pipeline developed for an undergraduate research project at **National Tsing Hua University**. It builds on [LMOL (ICASSP 2025)](https://doi.org/10.1109/ICASSP49660.2025.10889943): given two facial images, a multimodal model decides whether the **first**, **second**, or **neither** is preferred under the SCUT-FBP5500 labels. Pairwise decisions can then be converted to dataset-scale scores using reference-based Bradley–Terry estimation.
 
-## Implementation
+The main implementation change is the **training and inference interface**: rather than optimizing the likelihood of an entire textual answer, this version directly supervises three answer-token logits.
 
-- Base model: `llava-hf/llava-1.5-7b-hf` at 336×336 resolution.
-- Input: two separately encoded images with shared vision/projector weights.
-- Prompt: `<image1><image2>, which face looks more attractive?`.
-- Labels: `First.`, `Second.`, and `Similar.` with score threshold `theta=0.2`.
-- Training: frozen vision tower, trainable multimodal projector, and QLoRA on language-model attention projections.
-- Pairs: 30,000 examples per label and fold when enough candidates exist.
-- References: up to 10 train-split images per 0.1-wide score bin by default; test images are never references.
-- Evaluation: UOL Bradley-Terry score recovery with PC, MAE, and RMSE.
+## Key implementation: first-token classification
 
-Training and inference optimize only the first answer token as a three-way choice. They do not optimize the complete answer string or call `model.generate`. See [the method alignment note](docs/TRAINING_ALIGNMENT.md) for the paper-to-code boundary and reproducibility assumptions.
+The original LMOL paper formulates training as conditional language modeling over an answer such as `First.`, `Second.`, or `Similar.` (Section II-D, Equations 9–10). Our implementation treats the **next token at the end of the instruction prompt** as a three-way classification decision:
 
-## Setup
+1. Select the vocabulary logits for the first tokens of `First.`, `Second.`, and `Similar.`.
+2. Normalize **only those three logits** with softmax.
+3. Apply three-class cross-entropy to the corresponding label. At inference, choose the highest-scoring candidate without generating a free-form answer.
 
-Python 3.11 and a CUDA GPU are recommended for the pinned runtime:
+```python
+# After a forward pass over the two images and the instruction prompt:
+next_token_logits = outputs.logits[row_indices, choice_positions, :].float()
+choice_logits = next_token_logits.index_select(-1, choice_token_ids)
+loss = F.cross_entropy(choice_logits, choice_labels)
+```
+
+This keeps the classifier's decision space explicit and makes training and prediction use the same three candidates. It also avoids text-generation and answer-format parsing at inference. It is an **implementation adaptation**, not a claim of a controlled accuracy or speed improvement over the original LMOL objective.
+
+**Relevant code:** [prompt & token choices](data/instruction_dataset.py) · [training objective](training/train.py) · [pairwise inference](evaluation/inference.py) · [paper-to-code differences](docs/TRAINING_ALIGNMENT.md)
+
+## What's included
+
+- **Pairwise dataset preparation:** deterministic 80/20 train/test folds, score-difference labels (threshold `0.2`), and balanced offline sampling.
+- **Parameter-efficient multimodal fine-tuning:** `llava-hf/llava-1.5-7b-hf`, a frozen CLIP vision tower, a trainable LLaVA projector, and 4-bit QLoRA on language-model attention layers.
+- **Training utilities:** separate projector/LoRA learning rates, gradient accumulation, configurable checkpointing, and optional Weights & Biases logging.
+- **Evaluation:** constrained first-token predictions, training-split-only reference selection, UOL-style Bradley–Terry score estimation, and PC/MAE/RMSE metrics.
+- **Checks:** data-split leakage validation, CPU unit tests, and a checkpoint-independent dry run.
+
+## Quick start
+
+Requires **Python 3.11**, and a **CUDA GPU with sufficient VRAM** for LLaVA fine-tuning or inference. The dataset is obtained separately under its original terms; no SCUT-FBP5500 images or labels are redistributed here.
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
+source .venv/bin/activate                 # Windows: .venv\Scripts\activate
 python -m pip install -r requirements.txt
 python scripts/check_environment.py --strict-runtime
-```
 
-For a non-strict import and hardware summary:
-
-```bash
-python scripts/check_environment.py
-```
-
-## Dataset
-
-SCUT-FBP5500 is distributed under the dataset authors’ non-commercial research terms. Review those terms before running:
-
-```bash
 python scripts/download_scut_fbp5500.py --accept-terms
 python scripts/prepare_scut_fbp5500.py
+python scripts/build_pairs.py --fold-index 0
+python scripts/train.py --fold-index 0 --dry-run
+python scripts/train.py --fold-index 0
 ```
 
-Expected layout:
-
-```text
-data/raw/SCUT-FBP5500/
-├── Images/
-└── labels.txt
-```
-
-`labels.txt` accepts whitespace-delimited or CSV rows containing an image name and mean score. For manual setup instructions:
-
-```bash
-python scripts/prepare_scut_fbp5500.py --print-manual-steps
-```
-
-## Build Pairs
-
-Build every configured fold, or only fold 0:
-
-```bash
-python scripts/build_pairs.py --config configs/lmol_scut_fbp5500.yaml
-python scripts/build_pairs.py --config configs/lmol_scut_fbp5500.yaml --fold-index 0
-```
-
-Each fold writes:
-
-```text
-artifacts/pairs/full/fold_0/
-├── train_images.csv
-├── test_images.csv
-├── references.csv
-├── train_pairs.csv
-└── test_reference_pairs.csv
-```
-
-References are selected only from that fold’s training split. Set `evaluation.reference_max_per_bin: null` to use every train image in each non-empty score bin.
-
-## Train
-
-Validate the fold-0 inputs without loading model weights:
-
-```bash
-python scripts/train.py --config configs/lmol_scut_fbp5500.yaml --fold-index 0 --dry-run
-```
-
-Start training:
-
-```bash
-python scripts/train.py --config configs/lmol_scut_fbp5500.yaml --fold-index 0
-```
-
-The default effective batch size is 16 (`per_device_batch_size: 1`, `gradient_accumulation_steps: 16`) with seed 42. Weights & Biases is enabled by default; use `--no-wandb` or `--wandb-mode offline` when needed. `--stop-after-steps N` stops a diagnostic run without changing the configured scheduler horizon.
-
-## Checkpoint and Evaluation
-
-Download the fold-0 adapter and projector checkpoint:
-
-```bash
-python -m pip install -U huggingface_hub
-hf download ljc-1222/LMOL-fbp5500 \
-  --repo-type dataset \
-  --include "checkpoints/fold0/*" \
-  --local-dir .
-```
-
-Run the complete fold evaluator:
+Once training finishes, evaluate its saved checkpoint:
 
 ```bash
 python scripts/evaluate_fold.py \
-  --config configs/lmol_scut_fbp5500.yaml \
   --fold-index 0 \
-  --checkpoint checkpoints/fold0 \
-  --batch-size 8
+  --checkpoint outputs/lmol_scut_fbp5500/fold_0/last
 ```
 
-Use `--limit 256` for a checkpoint smoke test. It is not a full evaluation.
+**Training and full target/reference evaluation are GPU-intensive.** The default configuration is a lightweight *example setup*, not the exact schedule used in the original student project or LMOL paper. See [Usage](docs/USAGE.md) for dataset layout, optional evaluation and logging, checkpoint handling, and smoke tests.
 
-Pairwise prediction and score estimation can also run separately:
+Run the CPU unit tests with:
 
 ```bash
-python scripts/pairwise_infer.py \
-  --config configs/lmol_scut_fbp5500.yaml \
-  --fold-index 0 \
-  --checkpoint checkpoints/fold0
-
-python scripts/estimate_scores.py \
-  --config configs/lmol_scut_fbp5500.yaml \
-  --fold-index 0 \
-  --predictions outputs/evaluation/fold_0/pairwise_predictions.csv
+python -m unittest discover -s tests -v
 ```
 
-Generated datasets, checkpoints, predictions, metrics, and experiment logs are ignored by Git.
+## Repository structure
 
-## Tests
+| Location | Purpose |
+| --- | --- |
+| [`data/`](data/) | Annotations, pair sampling, prompt collation, reference selection |
+| [`model/`](model/) | LLaVA / QLoRA setup and adapter/projector checkpoints |
+| [`training/`](training/) | First-token cross-entropy, optimizer, training loop |
+| [`evaluation/`](evaluation/) | Pairwise token scoring, Bradley–Terry estimation, metrics |
+| [`scripts/`](scripts/) | CLI entry points for preparing, training, and evaluating |
+| [`configs/`](configs/) | Typed configuration and an example YAML |
+| [`tests/`](tests/) | CPU tests for data and core model/estimation logic |
 
-```bash
-python -m unittest discover -s tests
-```
+## Project scope and attribution
 
-## Citation
+The student project also explored **different class distributions, a two-class setting, weighted cross-entropy, KL-based order-consistency regularization, and checkpoint ensembling**. These historical experiments are **not implemented as selectable training modes in this public release**. This repository is the core balanced three-class pipeline; it does not include the student report or experimental artifacts.
 
-```bibtex
-@inproceedings{liu2025large,
-  title = {Large Multimodal Model is a Better Comparator on Facial Beauty Prediction},
-  author = {Liu, Zhenyou and Liang, Xuefeng and Lin, Jian},
-  booktitle = {ICASSP 2025 - 2025 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)},
-  pages = {1--5},
-  year = {2025},
-  doi = {10.1109/ICASSP49660.2025.10889943}
-}
-```
+**Student project:** National Tsing Hua University, Department of Electrical Engineering (2025). **Jin-Cheng Lin** focused on model training; **Hsin-Chang Tsai** worked on inference and analysis. **Advisor:** Prof. Yeong-Luh Ueng.
+
+**Prior work:** Z. Liu, X. Liang, and J. Lin, *Large Multimodal Model is a Better Comparator on Facial Beauty Prediction*, ICASSP 2025 ([DOI](https://doi.org/10.1109/ICASSP49660.2025.10889943)); and [Uncertainty-oriented Order Learning (UOL)](https://arxiv.org/abs/2409.00603).
+
+**Data and weights:** [SCUT-FBP5500](https://github.com/HCIILAB/SCUT-FBP5500-Database-Release) is released for non-commercial research under the dataset authors' terms. The [LLaVA-1.5-7B checkpoint](https://huggingface.co/llava-hf/llava-1.5-7b-hf) has separate model/license terms. The historical [checkpoint package](https://huggingface.co/datasets/ljc-1222/LMOL-fbp5500) is a separate artifact; its original run configuration should not be conflated with the current example defaults. Facial-attractiveness labels are subjective human ratings and should not be treated as objective judgments or used for consequential decisions.
+
+No license is currently granted for reuse of this repository's source code; the dataset and model licenses are independent.
