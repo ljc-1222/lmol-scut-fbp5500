@@ -72,16 +72,25 @@ class LMOLDataCollator:
         return apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
 
     @staticmethod
-    def format_prompt_answer(prompt: str, answer: str) -> str:
-        """Append the short LMOL answer using the separator expected by the prompt."""
+    def last_prompt_token_positions(batch: dict[str, Any]) -> Any:
+        """Find the final attended prompt token, for either padding direction."""
 
-        clean_prompt = prompt.rstrip()
-        separator = " " if clean_prompt.endswith("ASSISTANT:") else "\n"
-        return f"{clean_prompt}{separator}{answer}"
+        import torch
+
+        input_ids = batch["input_ids"]
+        attention_mask = batch.get("attention_mask")
+        if attention_mask is None:
+            if input_ids.shape[0] != 1:
+                raise ValueError("Batched first-token scoring requires an attention_mask")
+            return torch.full((1,), input_ids.shape[1] - 1, dtype=torch.long, device=input_ids.device)
+        if not bool(attention_mask.any(dim=1).all()):
+            raise ValueError("Every first-token scoring example must contain a non-padding prompt token")
+        positions = torch.arange(input_ids.shape[1], device=attention_mask.device).unsqueeze(0)
+        return (attention_mask.long() * positions).max(dim=1).values.long()
 
     @staticmethod
     def answer_token_ids(tokenizer: Any) -> list[int]:
-        """Return the single next-token IDs used for discriminative choice loss."""
+        """Resolve the three candidate first-token IDs from the configured tokenizer."""
 
         token_ids: list[int] = []
         for answer in VALID_ANSWERS:
@@ -89,42 +98,29 @@ class LMOLDataCollator:
             if not ids:
                 raise ValueError(f"Could not tokenize answer: {answer!r}")
             token_ids.append(int(ids[0]))
+        if len(set(token_ids)) != len(token_ids):
+            raise ValueError(
+                "The first tokens for First., Second., and Similar. must have distinct vocabulary IDs"
+            )
         return token_ids
 
-    @staticmethod
-    def find_answer_token_position(input_ids: Any, answer_token_id: int) -> int:
-        """Find the answer word token after processor image-token expansion."""
-
-        matches = (input_ids == answer_token_id).nonzero(as_tuple=True)[0]
-        if len(matches) == 0:
-            raise ValueError(f"Answer token id {answer_token_id} was not found in processor input IDs")
-        return int(matches[-1].item())
-
     def __call__(self, examples: list[dict[str, Any]]) -> dict[str, Any]:
-        """Tokenize a batch and mask labels so only the first answer token is supervised."""
-
-        prompts = [self.render_prompt(self.processor, item["instruction"]) for item in examples]
-        full_texts = [self.format_prompt_answer(prompt, item["answer"]) for prompt, item in zip(prompts, examples)]
-        images = [image for item in examples for image in (item["image1"], item["image2"])]
-        batch = self.processor(text=full_texts, images=images, padding=True, return_tensors="pt")
-        labels = batch["input_ids"].clone()
-        tokenizer = self.processor.tokenizer
-        answer_token_ids = self.answer_token_ids(tokenizer)
-        choice_positions: list[int] = []
-        for row_idx, item in enumerate(examples):
-            answer_token_id = answer_token_ids[ANSWER_TO_INDEX[item["answer"]]]
-            answer_start = self.find_answer_token_position(batch["input_ids"][row_idx], answer_token_id)
-            labels[row_idx, :answer_start] = -100
-            labels[row_idx, answer_start + 1 :] = -100
-            choice_positions.append(answer_start - 1)
-        labels[labels == tokenizer.pad_token_id] = -100
-        batch["labels"] = labels
+        """Encode prompts only: training and inference use the same decision position."""
 
         import torch
 
-        batch["choice_labels"] = torch.tensor([ANSWER_TO_INDEX[item["answer"]] for item in examples], dtype=torch.long)
-        batch["choice_positions"] = torch.tensor(choice_positions, dtype=torch.long)
-        batch["choice_token_ids"] = torch.tensor(answer_token_ids, dtype=torch.long)
+        if not examples:
+            raise ValueError("Cannot collate an empty LMOL batch")
+        prompts = [self.render_prompt(self.processor, item["instruction"]).rstrip() for item in examples]
+        images = [image for item in examples for image in (item["image1"], item["image2"])]
+        batch = self.processor(text=prompts, images=images, padding=True, return_tensors="pt")
+        batch["choice_positions"] = self.last_prompt_token_positions(batch)
+        batch["choice_labels"] = torch.tensor(
+            [ANSWER_TO_INDEX[item["answer"]] for item in examples], dtype=torch.long
+        )
+        batch["choice_token_ids"] = torch.tensor(
+            self.answer_token_ids(self.processor.tokenizer), dtype=torch.long
+        )
         return batch
 
 

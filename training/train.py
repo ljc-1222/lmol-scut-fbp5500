@@ -224,7 +224,6 @@ def train_lmol(
                 choice_labels = batch.pop("choice_labels")
                 choice_positions = batch.pop("choice_positions")
                 choice_token_ids = batch.pop("choice_token_ids")
-                batch.pop("labels")
                 outputs = model(**batch)
                 row_indices = torch.arange(outputs.logits.shape[0], device=outputs.logits.device)
                 next_token_logits = outputs.logits[row_indices, choice_positions, :].float()
