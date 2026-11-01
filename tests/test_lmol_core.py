@@ -212,7 +212,7 @@ class LMOLCoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "legacy_eval.yaml"
             text = Path("configs/lmol_scut_fbp5500.yaml").read_text(encoding="utf-8")
-            config_path.write_text(text.replace("eval_steps: 500", "reference_count: 340\n  bt_grid_size: 401\n  eval_steps: 500"), encoding="utf-8")
+            config_path.write_text(text.replace("evaluation:\n", "evaluation:\n  reference_count: 340\n  bt_grid_size: 401\n", 1), encoding="utf-8")
 
             with self.assertRaisesRegex(ValueError, "Legacy evaluation config keys"):
                 load_config(config_path)
@@ -782,16 +782,16 @@ evaluation:
         self.assertEqual(config.training.gradient_accumulation_steps, 16)
         self.assertEqual(config.evaluation.batch_size, 2)
         self.assertFalse(config.training.gradient_checkpointing)
-        self.assertTrue(config.wandb.enabled)
+        self.assertFalse(config.wandb.enabled)
         self.assertEqual(config.wandb.project, "lmol-fbp")
-        self.assertEqual(config.wandb.mode, "online")
+        self.assertEqual(config.wandb.mode, "offline")
         self.assertIn("scut-fbp5500", config.wandb.tags)
         self.assertEqual(config.pairs.instruction, "<image1><image2>, which face looks more attractive?")
         self.assertEqual(config.evaluation.reference_bin_width, 0.1)
         self.assertEqual(config.evaluation.reference_max_per_bin, 10)
         self.assertEqual(config.evaluation.bt_delta, 2.0)
         self.assertEqual(config.evaluation.bt_k, 10.0)
-        self.assertEqual(config.evaluation.eval_steps, 500)
+        self.assertEqual(config.evaluation.eval_steps, 0)
         self.assertEqual(config.evaluation.eval_max_pairs, 256)
 
     def test_fold_scoped_config_outputs(self) -> None:

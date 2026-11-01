@@ -19,11 +19,13 @@ def main() -> int:
     parser.add_argument("--config", default="configs/lmol_scut_fbp5500.yaml")
     parser.add_argument("--fold-index", type=int, help="Fold index to train. Defaults to dataset.fold_index from the config.")
     parser.add_argument("--pairs", help="Path to train_pairs.csv. Defaults to the configured fold output.")
-    parser.add_argument("--eval-pairs", help="Path to eval pairs CSV. Defaults to the configured fold test-reference pairs.")
-    parser.add_argument("--no-eval", action="store_true", help="Disable training-time pairwise likelihood eval.")
+    parser.add_argument("--eval-pairs", help="Opt-in training-time evaluation on a separate TRAIN-ONLY validation pair CSV.")
+    parser.add_argument("--no-eval", action="store_true", help="Disable training-time evaluation even if --eval-pairs was supplied.")
     parser.add_argument("--max-steps", type=int, help="Override the configured training horizon and scheduler length.")
     parser.add_argument("--stop-after-steps", type=int, help="Stop early without changing the configured scheduler horizon; useful for diagnostics.")
-    parser.add_argument("--no-wandb", action="store_true", help="Disable Weights & Biases logging for this run.")
+    wandb_group = parser.add_mutually_exclusive_group()
+    wandb_group.add_argument("--wandb", action="store_true", help="Opt in to Weights & Biases logging (offline by default).")
+    wandb_group.add_argument("--no-wandb", action="store_true", help="Disable Weights & Biases logging for this run.")
     parser.add_argument("--wandb-mode", choices=["online", "offline", "disabled"], help="Override the configured wandb mode.")
     parser.add_argument("--wandb-project", help="Override the configured wandb project.")
     parser.add_argument("--wandb-name", help="Override the configured wandb run name.")
@@ -31,15 +33,20 @@ def main() -> int:
     args = parser.parse_args()
     config = config_for_fold(load_config(args.config), args.fold_index)
     pairs_csv = Path(args.pairs) if args.pairs else config.pairs.output_dir / f"fold_{config.dataset.fold_index}" / "train_pairs.csv"
+    # Training-time monitoring is opt-in and must never silently consume test pairs.
     eval_pairs_csv = None
-    if not args.no_eval and config.evaluation.eval_steps > 0:
-        eval_pairs_csv = Path(args.eval_pairs) if args.eval_pairs else config.pairs.output_dir / f"fold_{config.dataset.fold_index}" / "test_reference_pairs.csv"
+    if args.eval_pairs and not args.no_eval:
+        if config.evaluation.eval_steps <= 0:
+            parser.error("Set evaluation.eval_steps > 0 in your config to use --eval-pairs")
+        eval_pairs_csv = Path(args.eval_pairs)
     pairs = read_pairs_csv(pairs_csv)
     assert_pair_images_exist(pairs)
     print(f"Using fold {config.dataset.fold_index}; checkpoints will be written under {config.training.output_dir}")
     print(f"Loaded {len(pairs)} LMOL instruction pairs from {pairs_csv}")
     if eval_pairs_csv is not None:
         eval_pairs = read_pairs_csv(eval_pairs_csv)
+        if any(pair.split == "test" for pair in eval_pairs):
+            parser.error("--eval-pairs must be training-only validation pairs, not test-reference pairs")
         assert_pair_images_exist(eval_pairs)
         print(f"Loaded {len(eval_pairs)} LMOL eval pairs from {eval_pairs_csv}; evaluating {min(config.evaluation.eval_max_pairs, len(eval_pairs))} every {config.evaluation.eval_steps} steps")
     if args.dry_run:
@@ -51,7 +58,7 @@ def main() -> int:
         max_steps=args.max_steps,
         eval_pairs_csv=eval_pairs_csv,
         stop_after_steps=args.stop_after_steps,
-        wandb_enabled=False if args.no_wandb else None,
+        wandb_enabled=True if args.wandb else (False if args.no_wandb else None),
         wandb_mode=args.wandb_mode,
         wandb_project=args.wandb_project,
         wandb_name=args.wandb_name,

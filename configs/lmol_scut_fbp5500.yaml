@@ -42,12 +42,12 @@ training:
   log_steps: 10
 
 wandb:
-  enabled: true
+  enabled: false
   project: lmol-fbp
   entity:
   name:
   group:
-  mode: online
+  mode: offline
   tags: ["lmol", "scut-fbp5500"]
 
 evaluation:
@@ -60,5 +60,5 @@ evaluation:
   score_max: 5.0
   bt_delta: 2.0
   bt_k: 10.0
-  eval_steps: 500
+  eval_steps: 0
   eval_max_pairs: 256
