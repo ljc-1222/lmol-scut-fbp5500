@@ -113,44 +113,76 @@ class LMOLCoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "processor image size"):
             _validate_processor_image_size(mismatched, 336)
 
-    def test_collator_supervises_only_first_answer_token(self) -> None:
+    def test_collator_scores_prompt_without_appending_answer(self) -> None:
         import torch
 
         class FakeTokenizer:
             pad_token_id = 0
-
-            def __init__(self) -> None:
-                self.answer_ids = {ANSWER_FIRST: [10, 13], ANSWER_SECOND: [11, 13], ANSWER_SIMILAR: [12, 13]}
+            answer_ids = {
+                ANSWER_FIRST: [10, 13],
+                ANSWER_SECOND: [11, 13],
+                ANSWER_SIMILAR: [12, 13],
+            }
 
             def __call__(self, text: str, add_special_tokens: bool = True) -> SimpleNamespace:
                 if not add_special_tokens and text in self.answer_ids:
                     return SimpleNamespace(input_ids=self.answer_ids[text])
-                ids = [1, 2, 3]
-                for answer, answer_ids in self.answer_ids.items():
-                    if text.endswith(answer):
-                        ids.extend(answer_ids)
-                        break
-                return SimpleNamespace(input_ids=ids)
+                return SimpleNamespace(input_ids=[1, 2, 3])
 
         class FakeProcessor:
             def __init__(self) -> None:
                 self.tokenizer = FakeTokenizer()
+                self.text_seen: list[str] = []
 
             def __call__(self, text: list[str], images: list[object], padding: bool, return_tensors: str) -> dict[str, torch.Tensor]:
                 del images, padding, return_tensors
-                rows = [self.tokenizer(item).input_ids for item in text]
-                return {"input_ids": torch.tensor(rows, dtype=torch.long)}
+                self.text_seen.extend(text)
+                return {
+                    "input_ids": torch.tensor([[1, 2, 3]], dtype=torch.long),
+                    "attention_mask": torch.tensor([[1, 1, 1]], dtype=torch.long),
+                }
 
-        batch = LMOLDataCollator(FakeProcessor())(
+        processor = FakeProcessor()
+        batch = LMOLDataCollator(processor)(
             [{"image1": object(), "image2": object(), "instruction": make_instruction(), "answer": ANSWER_FIRST}]
         )
-        supervised = (batch["labels"][0] != -100).nonzero(as_tuple=True)[0].tolist()
 
-        self.assertEqual(supervised, [3])
-        self.assertEqual(int(batch["labels"][0, 3]), 10)
-        self.assertEqual(int(batch["choice_labels"][0]), 0)
-        self.assertEqual(int(batch["choice_positions"][0]), 2)
-        self.assertEqual(LMOLDataCollator.find_answer_token_position(torch.tensor([10, 2, 10, 13]), 10), 2)
+        self.assertEqual(batch["input_ids"][0].tolist(), [1, 2, 3])
+        self.assertEqual(batch["choice_labels"].tolist(), [0])
+        self.assertEqual(batch["choice_positions"].tolist(), [2])
+        self.assertEqual(batch["choice_token_ids"].tolist(), [10, 11, 12])
+        self.assertNotIn("labels", batch)
+        self.assertTrue(all(not text.endswith(ANSWER_FIRST) for text in processor.text_seen))
+
+    def test_prompt_choice_positions_handle_padding(self) -> None:
+        import torch
+
+        batch = {
+            "input_ids": torch.tensor([[1, 2, 0, 0], [1, 2, 3, 4]]),
+            "attention_mask": torch.tensor([[1, 1, 0, 0], [1, 1, 1, 1]]),
+        }
+        self.assertEqual(LMOLDataCollator.prompt_choice_positions(batch).tolist(), [1, 3])
+
+        left_pad = {
+            "input_ids": torch.tensor([[0, 0, 1, 2], [0, 1, 2, 3]]),
+            "attention_mask": torch.tensor([[0, 0, 1, 1], [0, 1, 1, 1]]),
+        }
+        self.assertEqual(LMOLDataCollator.prompt_choice_positions(left_pad).tolist(), [3, 3])
+        with self.assertRaisesRegex(ValueError, "attention_mask"):
+            LMOLDataCollator.prompt_choice_positions({"input_ids": torch.ones((2, 3), dtype=torch.long)})
+        with self.assertRaisesRegex(ValueError, "non-padding"):
+            LMOLDataCollator.prompt_choice_positions(
+                {"input_ids": torch.zeros((1, 3), dtype=torch.long), "attention_mask": torch.zeros((1, 3), dtype=torch.long)}
+            )
+
+    def test_first_token_choices_must_be_distinct(self) -> None:
+        class AmbiguousTokenizer:
+            def __call__(self, text: str, add_special_tokens: bool = True) -> SimpleNamespace:
+                del add_special_tokens
+                return SimpleNamespace(input_ids=[4] if text in (ANSWER_FIRST, ANSWER_SECOND) else [5])
+
+        with self.assertRaisesRegex(ValueError, "distinct"):
+            LMOLDataCollator.answer_token_ids(AmbiguousTokenizer())
 
     def test_partial_gradient_accumulation_group(self) -> None:
         states = [_accumulation_group(index, batch_count=5, accumulation_steps=4) for index in range(1, 6)]
