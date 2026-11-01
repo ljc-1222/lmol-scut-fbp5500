@@ -1,10 +1,10 @@
 # Running the public LMOL pipeline
 
-This document covers the **balanced three-class implementation** in this repository. It is not a recipe for repeating every experiment in the 2025 student project. Start with the [README](../README.md) for the project background and [method alignment notes](TRAINING_ALIGNMENT.md) for the differences from LMOL.
+This document covers the **balanced three-class pipeline** in this repository. Start with the [README](../README.md) for the project and results, [Experiments](EXPERIMENTS.md) for historical settings and evaluation scope, and [implementation notes](TRAINING_ALIGNMENT.md) for the objective and score estimator.
 
 ## Environment
 
-Use **Python 3.11**, preferably on Linux or WSL2. Training and pairwise inference use an NVIDIA CUDA GPU with enough VRAM for LLaVA-1.5-7B. Dependencies in [`requirements.txt`](../requirements.txt) target an older pinned Transformers / PyTorch / PEFT stack; avoid mixing it with an existing environment. The specific GPU/CUDA combination has **not** been revalidated in this documentation pass.
+Use **Python 3.11**, preferably on Linux or WSL2. Training and pairwise inference use an NVIDIA CUDA GPU with enough VRAM for LLaVA-1.5-7B. Install the pinned dependencies in [`requirements.txt`](../requirements.txt) in a separate environment. Choose a PyTorch wheel compatible with your CUDA device; the environment check below verifies imports and device visibility.
 
 ```bash
 python3.11 -m venv .venv
@@ -63,7 +63,7 @@ Train using the YAML defaults:
 python scripts/train.py --fold-index 0 --no-wandb
 ```
 
-The *example* YAML configures one epoch, per-device batch size 1, gradient accumulation 16, separate learning rates for the projector and LoRA parameters, and periodic checkpoint saving. These settings do **not** claim to be the 5-epoch / effective-batch-64 configuration of the original student experiments.
+The *example* YAML configures one epoch, per-device batch size 1, gradient accumulation 16, separate learning rates for the projector and LoRA parameters, and periodic checkpoint saving. The historical report uses five epochs and effective batch size 64; it also uses a different score-search grid. See [the experiment/code comparison](EXPERIMENTS.md#relation-to-the-public-implementation).
 
 W&B logging is enabled by default in the YAML; `--no-wandb` opts out, and `--wandb-mode offline` avoids online logging. `--stop-after-steps N` exits a diagnostic run without shortening the configured learning-rate schedule.
 
