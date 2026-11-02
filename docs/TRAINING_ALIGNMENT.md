@@ -36,14 +36,25 @@ The defaults are `bt_delta: 2.0` and `bt_k: 10.0`, giving a transition offset of
 
 ## Experiment settings and public defaults
 
-The [ablation study](EXPERIMENTS.md#label-distribution) and the example configuration use the following settings:
+The [ablation study](EXPERIMENTS.md#training-configurations) and the example configuration use the following settings:
 
-| Setting | Ablation experiments | Public example |
-| --- | --- | --- |
-| Training duration | Five epochs | One epoch |
-| Effective batch size | 64 | 16 |
-| Image split | One 4,400 / 1,100 split | Seeded five-fold partition; selected fold used per run |
-| Score-search candidates | Ratings from 1 to 5 in steps of 0.001 | Unique reference scores |
-| Training variants | Label-distribution, loss, and ensemble studies | Balanced three-class CE |
+<div align="center">
+<table width="100%" align="center">
+<thead>
+<tr>
+<th width="10000" align="center">Setting</th>
+<th width="10000" align="center">Ablation experiments</th>
+<th width="10000" align="center">Public example</th>
+</tr>
+</thead>
+<tbody>
+<tr><td align="center">Training duration</td><td align="center">Five epochs</td><td align="center">One epoch</td></tr>
+<tr><td align="center">Effective batch size</td><td align="center">64</td><td align="center">16</td></tr>
+<tr><td align="center">Image split</td><td align="center">One 4,400 / 1,100 split</td><td align="center">Seeded five-fold partition; selected fold used per run</td></tr>
+<tr><td align="center">Score-search candidates</td><td align="center">Ratings from 1 to 5 in steps of 0.001</td><td align="center">Unique reference scores</td></tr>
+<tr><td align="center">Training variants</td><td align="center">Label-distribution, loss, and ensemble studies</td><td align="center">Balanced three-class CE</td></tr>
+</tbody>
+</table>
+</div>
 
-The example runs the public pipeline; it is not an exact recipe for the ablation tables. The [released checkpoint results](EXPERIMENTS.md#released-checkpoint) form a separate evaluation with linked metrics and confusion counts. See [Usage](USAGE.md) for training and checkpoint evaluation commands.
+The example runs the public pipeline; it is not an exact recipe for the ablation tables. See [Usage](USAGE.md) for training and checkpoint evaluation commands.

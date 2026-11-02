@@ -111,7 +111,7 @@ python scripts/evaluate_fold.py \
   --batch-size 8
 ```
 
-Use the dataset configuration with split seed 42. The published evaluation covers 1,100 test images and 374,000 comparisons. [Released results](EXPERIMENTS.md#released-checkpoint) links the metrics, completed progress record, and confusion matrix. Loading the adapter alone is incomplete: `projector.pt` is also required.
+Use the dataset configuration with split seed 42. Loading the adapter alone is incomplete: `projector.pt` is also required.
 
 ## Tests and code guide
 
@@ -121,11 +121,21 @@ python -m unittest discover -s tests -v
 
 Tests use synthetic data and do not require the dataset or 7B model weights.
 
-| Component | Entry points |
-| --- | --- |
-| Splits, pair sampling, references | [`data/`](../data/), [`scripts/build_pairs.py`](../scripts/build_pairs.py) |
-| Model loading and checkpoint handling | [`model/lmol.py`](../model/lmol.py) |
-| Prompt construction and first-token CE | [`data/instruction_dataset.py`](../data/instruction_dataset.py), [`training/train.py`](../training/train.py) |
-| Pairwise inference and score recovery | [`evaluation/`](../evaluation/), [`scripts/evaluate_fold.py`](../scripts/evaluate_fold.py) |
+<div align="center">
+<table width="100%" align="center">
+<thead>
+<tr>
+<th width="10000" align="center">Component</th>
+<th width="10000" align="center">Entry points</th>
+</tr>
+</thead>
+<tbody>
+<tr><td align="center">Splits, pair sampling, references</td><td align="center"><a href="../data/"><code>data/</code></a>, <a href="../scripts/build_pairs.py"><code>scripts/build_pairs.py</code></a></td></tr>
+<tr><td align="center">Model loading and checkpoint handling</td><td align="center"><a href="../model/lmol.py"><code>model/lmol.py</code></a></td></tr>
+<tr><td align="center">Prompt construction and first-token CE</td><td align="center"><a href="../data/instruction_dataset.py"><code>data/instruction_dataset.py</code></a>, <a href="../training/train.py"><code>training/train.py</code></a></td></tr>
+<tr><td align="center">Pairwise inference and score recovery</td><td align="center"><a href="../evaluation/"><code>evaluation/</code></a>, <a href="../scripts/evaluate_fold.py"><code>scripts/evaluate_fold.py</code></a></td></tr>
+</tbody>
+</table>
+</div>
 
 Input data, generated pair CSVs, checkpoints, predictions, and logs are excluded from Git.
