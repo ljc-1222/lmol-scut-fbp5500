@@ -1,146 +1,78 @@
 # LMOL on SCUT-FBP5500
 
-Research implementation of **Large Multimodal Model based Order Learning (LMOL)** for facial beauty prediction on **SCUT-FBP5500**.
+Unofficial PyTorch implementation of [*Large Multimodal Model is a Better Comparator on Facial Beauty Prediction*](https://doi.org/10.1109/ICASSP49660.2025.10889943) (ICASSP 2025), covering data preparation, LLaVA fine-tuning, pairwise inference, and score evaluation on [SCUT-FBP5500](https://github.com/HCIILAB/SCUT-FBP5500-Database-Release).
 
-The implementation follows Liu, Liang, and Lin, [“Large Multimodal Model is a Better Comparator on Facial Beauty Prediction”](https://doi.org/10.1109/ICASSP49660.2025.10889943), ICASSP 2025. It compares two faces as `First.`, `Second.`, or `Similar.`, then recovers absolute scores from target-reference comparisons with UOL-style Bradley-Terry estimation.
+A fine-tuned LLaVA-1.5-7B compares two faces as `First.`, `Second.`, or `Similar.`. Comparisons against reference faces with known ratings are then combined through Bradley–Terry estimation to recover a score in the 1–5 range.
 
-## Implementation
+## Method
 
-- Base model: `llava-hf/llava-1.5-7b-hf` at 336×336 resolution.
-- Input: two separately encoded images with shared vision/projector weights.
-- Prompt: `<image1><image2>, which face looks more attractive?`.
-- Labels: `First.`, `Second.`, and `Similar.` with score threshold `theta=0.2`.
-- Training: frozen vision tower, trainable multimodal projector, and QLoRA on language-model attention projections.
-- Pairs: 30,000 examples per label and fold when enough candidates exist.
-- References: up to 10 train-split images per 0.1-wide score bin by default; test images are never references.
-- Evaluation: UOL Bradley-Terry score recovery with PC, MAE, and RMSE.
+- **Instruction pairs:** sample 90,000 pairs per fold, balanced across the three order labels. A rating difference within θ = 0.2 is labeled `Similar.`.
+- **Comparator:** encode both images separately with a shared CLIP ViT-L/14-336px encoder and multimodal projector. Freeze the vision tower and train the projector together with 4-bit QLoRA adapters on the language model.
+- **Score recovery:** select references from the training split in 0.1-wide score bins, compare each test face against those references, and maximize the UOL-style Bradley–Terry likelihood.
 
-Training and inference optimize only the first answer token as a three-way choice. They do not optimize the complete answer string or call `model.generate`. See [the method alignment note](docs/TRAINING_ALIGNMENT.md) for the paper-to-code boundary and reproducibility assumptions.
+[Method and reproduction settings](docs/TRAINING_ALIGNMENT.md) documents the paper settings and the code's training objective, fold construction, and score estimator.
 
-## Setup
+## Quickstart
 
-Python 3.11 and a CUDA GPU are recommended for the pinned runtime:
+### Environment
+
+Use Python 3.11 and a CUDA-capable GPU for training and model inference. Run subsequent commands from the repository root.
 
 ```bash
-python -m venv .venv
+git clone https://github.com/ljc-1222/lmol-scut-fbp5500.git
+cd lmol-scut-fbp5500
+python3.11 -m venv .venv
 source .venv/bin/activate
-python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python scripts/check_environment.py --strict-runtime
 ```
 
-For a non-strict import and hardware summary:
+### Data
 
-```bash
-python scripts/check_environment.py
-```
-
-## Dataset
-
-SCUT-FBP5500 is distributed under the dataset authors’ non-commercial research terms. Review those terms before running:
+Review the [dataset's non-commercial research terms](https://github.com/HCIILAB/SCUT-FBP5500-Database-Release), then download and validate the images and mean ratings:
 
 ```bash
 python scripts/download_scut_fbp5500.py --accept-terms
 python scripts/prepare_scut_fbp5500.py
+python scripts/build_pairs.py --fold-index 0
 ```
 
-Expected layout:
+The pair builder writes the image splits, training pairs, reference manifest, and test/reference pairs under `artifacts/pairs/full/fold_0/`.
 
-```text
-data/raw/SCUT-FBP5500/
-├── Images/
-└── labels.txt
-```
+### Training and evaluation
 
-`labels.txt` accepts whitespace-delimited or CSV rows containing an image name and mean score. For manual setup instructions:
+Train one fold with the [default configuration](configs/lmol_scut_fbp5500.yaml), then evaluate its saved checkpoint:
 
 ```bash
-python scripts/prepare_scut_fbp5500.py --print-manual-steps
-```
-
-## Build Pairs
-
-Build every configured fold, or only fold 0:
-
-```bash
-python scripts/build_pairs.py --config configs/lmol_scut_fbp5500.yaml
-python scripts/build_pairs.py --config configs/lmol_scut_fbp5500.yaml --fold-index 0
-```
-
-Each fold writes:
-
-```text
-artifacts/pairs/full/fold_0/
-├── train_images.csv
-├── test_images.csv
-├── references.csv
-├── train_pairs.csv
-└── test_reference_pairs.csv
-```
-
-References are selected only from that fold’s training split. Set `evaluation.reference_max_per_bin: null` to use every train image in each non-empty score bin.
-
-## Train
-
-Validate the fold-0 inputs without loading model weights:
-
-```bash
-python scripts/train.py --config configs/lmol_scut_fbp5500.yaml --fold-index 0 --dry-run
-```
-
-Start training:
-
-```bash
-python scripts/train.py --config configs/lmol_scut_fbp5500.yaml --fold-index 0
-```
-
-The default effective batch size is 16 (`per_device_batch_size: 1`, `gradient_accumulation_steps: 16`) with seed 42. Weights & Biases is enabled by default; use `--no-wandb` or `--wandb-mode offline` when needed. `--stop-after-steps N` stops a diagnostic run without changing the configured scheduler horizon.
-
-## Checkpoint and Evaluation
-
-Download the fold-0 adapter and projector checkpoint:
-
-```bash
-python -m pip install -U huggingface_hub
-hf download ljc-1222/LMOL-fbp5500 \
-  --repo-type dataset \
-  --include "checkpoints/fold0/*" \
-  --local-dir .
-```
-
-Run the complete fold evaluator:
-
-```bash
+python scripts/train.py --fold-index 0 --no-eval --no-wandb
 python scripts/evaluate_fold.py \
-  --config configs/lmol_scut_fbp5500.yaml \
   --fold-index 0 \
-  --checkpoint checkpoints/fold0 \
-  --batch-size 8
+  --checkpoint outputs/lmol_scut_fbp5500/fold_0/last
 ```
 
-Use `--limit 256` for a checkpoint smoke test. It is not a full evaluation.
+The default schedule is one epoch with an effective batch size of 16. `--no-eval` leaves the held-out pairs for evaluation after training; `--no-wandb` disables external logging.
 
-Pairwise prediction and score estimation can also run separately:
+The [usage guide](docs/USAGE.md) covers manual data setup, all five folds, checkpoint files, separate inference/scoring commands, and tests.
 
-```bash
-python scripts/pairwise_infer.py \
-  --config configs/lmol_scut_fbp5500.yaml \
-  --fold-index 0 \
-  --checkpoint checkpoints/fold0
+## Evaluation
 
-python scripts/estimate_scores.py \
-  --config configs/lmol_scut_fbp5500.yaml \
-  --fold-index 0 \
-  --predictions outputs/evaluation/fold_0/pairwise_predictions.csv
-```
+`scripts/evaluate_fold.py` writes pairwise predictions, a confusion matrix, progress, and score metrics to `outputs/evaluation/fold_0/`. The score metrics are Pearson correlation (PC), mean absolute error (MAE), and root mean squared error (RMSE).
 
-Generated datasets, checkpoints, predictions, metrics, and experiment logs are ignored by Git.
+For reference, Table I of the LMOL paper reports the following SCUT-FBP5500 results:
 
-## Tests
+<div align="center">
+<table width="100%" align="center">
+<thead>
+<tr><th width="10000" align="center">Method</th><th width="10000" align="center">PC (%) ↑</th><th width="10000" align="center">MAE ↓</th><th width="10000" align="center">RMSE ↓</th></tr>
+</thead>
+<tbody>
+<tr><td align="center">UOL</td><td align="center">92.40</td><td align="center">0.1975</td><td align="center">0.2633</td></tr>
+<tr><td align="center">LMOL</td><td align="center"><b>95.65</b></td><td align="center"><b>0.1552</b></td><td align="center"><b>0.2032</b></td></tr>
+</tbody>
+</table>
+</div>
 
-```bash
-python -m unittest discover -s tests
-```
+The evaluator stores PC as a coefficient in `metrics.json`; multiply it by 100 for the percentage convention above. MAE and RMSE use the original 1–5 rating scale.
 
 ## Citation
 
