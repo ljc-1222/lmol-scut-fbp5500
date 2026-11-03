@@ -1,0 +1,36 @@
+name: Unit tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  cpu-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install CPU test dependencies
+        run: |
+          python -m pip install torch==2.4.1 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install numpy==1.26.4 Pillow PyYAML
+      - name: Check syntax
+        run: python -m compileall -q configs data evaluation model scripts training tests
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Check CLI entry points
+        run: |
+          python scripts/build_pairs.py --help > /dev/null
+          python scripts/train.py --help > /dev/null
+          python scripts/evaluate_fold.py --help > /dev/null
+          python scripts/pairwise_infer.py --help > /dev/null
+          python scripts/estimate_scores.py --help > /dev/null
+          python scripts/prepare_scut_fbp5500.py --help > /dev/null
+          python scripts/download_scut_fbp5500.py --help > /dev/null
+          python scripts/check_environment.py --help > /dev/null
